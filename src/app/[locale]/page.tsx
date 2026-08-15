@@ -1,9 +1,9 @@
 import { hasLocale } from "next-intl";
 import { getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/db";
+import { ProductCard } from "@/components/product/product-card";
 import { routing } from "@/i18n/routing";
-import { toDbLocale } from "@/lib/i18n/locale-map";
+import { getMenu } from "@/server/catalog/get-menu";
 
 export default async function MenuPage(props: PageProps<"/[locale]">) {
   const { locale } = await props.params;
@@ -12,47 +12,49 @@ export default async function MenuPage(props: PageProps<"/[locale]">) {
   }
 
   const t = await getTranslations({ locale, namespace: "menu" });
-  const dbLocale = toDbLocale(locale);
-
-  const store = await prisma.store.findFirst();
-  const categories = await prisma.category.findMany({
-    where: { isActive: true },
-    orderBy: { sortOrder: "asc" },
-    include: {
-      translations: true,
-      products: {
-        where: { isActive: true, deletedAt: null },
-        orderBy: { sortOrder: "asc" },
-        include: { translations: true },
-      },
-    },
-  });
-
-  function localized(translations: { locale: string; name: string }[]) {
-    return (
-      translations.find((tr) => tr.locale === dbLocale)?.name ??
-      translations.find((tr) => tr.locale === "ZH_TW")?.name ??
-      ""
-    );
-  }
+  const menu = await getMenu(locale);
+  const hasAnyProduct = menu.categories.some((c) => c.products.length > 0);
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "sans-serif" }}>
-      <h1>{store?.name}</h1>
-      <h2>{t("title")}</h2>
-      {categories.map((category) => (
-        <section key={category.id}>
-          <h3>{localized(category.translations)}</h3>
-          <ul>
-            {category.products.map((product) => (
-              <li key={product.id}>
-                {localized(product.translations)} — NT${product.basePrice}
-                {product.isSoldOut ? ` (${t("soldOut")})` : ""}
-              </li>
+    <main className="pb-16">
+      {hasAnyProduct ? (
+        <>
+          <nav className="sticky top-[3.25rem] z-[5] flex gap-2 overflow-x-auto border-b bg-background/95 px-4 py-2 backdrop-blur">
+            {menu.categories
+              .filter((c) => c.products.length > 0)
+              .map((category) => (
+                <a
+                  key={category.id}
+                  href={`#${category.slug}`}
+                  className="shrink-0 rounded-full border px-3 py-1 text-sm"
+                >
+                  {category.name}
+                </a>
+              ))}
+          </nav>
+
+          {menu.categories
+            .filter((c) => c.products.length > 0)
+            .map((category) => (
+              <section
+                key={category.id}
+                id={category.slug}
+                className="scroll-mt-28 px-4 pt-6"
+              >
+                <h2 className="mb-3 text-lg font-semibold">{category.name}</h2>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  {category.products.map((product) => (
+                    <ProductCard key={product.id} product={product} />
+                  ))}
+                </div>
+              </section>
             ))}
-          </ul>
-        </section>
-      ))}
+        </>
+      ) : (
+        <p className="px-4 py-16 text-center text-muted-foreground">
+          {t("empty")}
+        </p>
+      )}
     </main>
   );
 }

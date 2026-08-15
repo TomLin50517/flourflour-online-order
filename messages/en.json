@@ -1,6 +1,6 @@
 {
   "common": { "add": "Add", "cancel": "Cancel", "loading": "Loading…" },
-  "menu": { "title": "Menu", "soldOut": "Sold Out" },
+  "menu": { "title": "Menu", "soldOut": "Sold Out", "empty": "No items available yet" },
   "product": { "quantity": "Quantity", "addToCart": "Add to Cart", "required": "Required" },
   "cart": { "title": "Cart", "empty": "Your cart is empty", "subtotal": "Subtotal" },
   "checkout": { "title": "Checkout", "payNow": "Pay Now", "agreeTerms": "I agree to the terms of service" },
