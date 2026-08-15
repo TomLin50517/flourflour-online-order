@@ -1,0 +1,21 @@
+{
+  "common": { "add": "追加", "cancel": "キャンセル", "loading": "読み込み中…" },
+  "menu": { "title": "メニュー", "soldOut": "売り切れ" },
+  "product": { "quantity": "数量", "addToCart": "カートに追加", "required": "必須" },
+  "cart": { "title": "カート", "empty": "カートは空です", "subtotal": "小計" },
+  "checkout": { "title": "お会計", "payNow": "今すぐ支払う", "agreeTerms": "利用規約に同意します" },
+  "order": {
+    "pickupNumber": "受け取り番号",
+    "waitingPayment": "決済完了後に受け取り番号が表示されます",
+    "status": {
+      "PENDING_PAYMENT": "支払い待ち",
+      "PAID": "支払い完了",
+      "PREPARING": "準備中",
+      "READY": "受け取り可能",
+      "COMPLETED": "受け取り完了",
+      "CANCELLED": "キャンセル済み",
+      "REFUNDED": "返金済み"
+    }
+  },
+  "error": { "generic": "只今混み合っております。しばらくしてから再度お試しください", "outOfStock": "一部の商品は売り切れです" }
+}

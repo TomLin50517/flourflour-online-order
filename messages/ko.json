@@ -1,0 +1,21 @@
+{
+  "common": { "add": "담기", "cancel": "취소", "loading": "불러오는 중…" },
+  "menu": { "title": "메뉴", "soldOut": "품절" },
+  "product": { "quantity": "수량", "addToCart": "장바구니에 담기", "required": "필수" },
+  "cart": { "title": "장바구니", "empty": "장바구니가 비어 있습니다", "subtotal": "소계" },
+  "checkout": { "title": "결제", "payNow": "바로 결제", "agreeTerms": "서비스 이용약관에 동의합니다" },
+  "order": {
+    "pickupNumber": "픽업 번호",
+    "waitingPayment": "결제가 완료되면 픽업 번호가 표시됩니다",
+    "status": {
+      "PENDING_PAYMENT": "결제 대기중",
+      "PAID": "결제 완료",
+      "PREPARING": "준비중",
+      "READY": "픽업 가능",
+      "COMPLETED": "픽업 완료",
+      "CANCELLED": "취소됨",
+      "REFUNDED": "환불됨"
+    }
+  },
+  "error": { "generic": "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요", "outOfStock": "일부 상품이 품절되었습니다" }
+}

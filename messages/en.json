@@ -1,0 +1,21 @@
+{
+  "common": { "add": "Add", "cancel": "Cancel", "loading": "Loading…" },
+  "menu": { "title": "Menu", "soldOut": "Sold Out" },
+  "product": { "quantity": "Quantity", "addToCart": "Add to Cart", "required": "Required" },
+  "cart": { "title": "Cart", "empty": "Your cart is empty", "subtotal": "Subtotal" },
+  "checkout": { "title": "Checkout", "payNow": "Pay Now", "agreeTerms": "I agree to the terms of service" },
+  "order": {
+    "pickupNumber": "Pickup Number",
+    "waitingPayment": "Your pickup number will appear once payment is complete",
+    "status": {
+      "PENDING_PAYMENT": "Awaiting Payment",
+      "PAID": "Paid",
+      "PREPARING": "Preparing",
+      "READY": "Ready for Pickup",
+      "COMPLETED": "Completed",
+      "CANCELLED": "Cancelled",
+      "REFUNDED": "Refunded"
+    }
+  },
+  "error": { "generic": "We're experiencing an issue, please try again shortly", "outOfStock": "Some items are sold out" }
+}
