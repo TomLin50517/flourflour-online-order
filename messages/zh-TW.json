@@ -3,7 +3,19 @@
   "menu": { "title": "菜單", "soldOut": "已售完", "empty": "目前尚無商品" },
   "product": { "quantity": "數量", "addToCart": "加入購物車", "required": "必選" },
   "cart": { "title": "購物車", "empty": "購物車是空的", "subtotal": "小計" },
-  "checkout": { "title": "結帳", "payNow": "立即付款", "agreeTerms": "我同意服務條款" },
+  "checkout": {
+    "title": "結帳",
+    "payNow": "立即付款",
+    "agreeTerms": "我同意服務條款",
+    "name": "姓名（選填）",
+    "phone": "手機（選填）",
+    "note": "備註（選填）",
+    "submit": "送出訂單",
+    "submitting": "送出中…",
+    "orderCreated": "訂單已建立",
+    "paymentPending": "金流串接尚未完成，付款功能即將推出",
+    "backToMenu": "返回菜單"
+  },
   "order": {
     "pickupNumber": "取餐號碼",
     "waitingPayment": "付款完成後將顯示取餐號碼",

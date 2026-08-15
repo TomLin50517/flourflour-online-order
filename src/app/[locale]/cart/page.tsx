@@ -25,6 +25,7 @@ export default function CartPage() {
   const tMenu = useTranslations("menu");
   const tCommon = useTranslations("common");
   const tError = useTranslations("error");
+  const tCheckout = useTranslations("checkout");
   const locale = useLocale();
   const { lines, updateQuantity, removeLine } = useCart();
 
@@ -184,11 +185,22 @@ export default function CartPage() {
         <p className="mt-4 text-sm text-destructive">{tError("outOfStock")}</p>
       )}
 
-      <div className="fixed inset-x-0 bottom-0 z-10 border-t bg-background px-4 py-3">
+      <div className="fixed inset-x-0 bottom-0 z-10 space-y-2 border-t bg-background px-4 py-3">
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>{t("subtotal")}</span>
           <span>NT${subtotal}</span>
         </div>
+        <a
+          href={hasUnavailable ? undefined : `/${locale}/checkout`}
+          aria-disabled={hasUnavailable}
+          className={`block w-full rounded-md py-2 text-center text-sm font-medium ${
+            hasUnavailable
+              ? "cursor-not-allowed bg-muted text-muted-foreground"
+              : "bg-primary text-primary-foreground"
+          }`}
+        >
+          {tCheckout("title")}
+        </a>
       </div>
     </main>
   );

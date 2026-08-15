@@ -1,3 +1,4 @@
+import bcrypt from "bcrypt";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { LocaleCode } from "../src/generated/prisma/enums";
@@ -303,6 +304,21 @@ async function main() {
   }
 
   console.log(`Seeded store "${store.name}" with ${categories.length} categories, ${optionGroups.length} option groups, ${products.length} products.`);
+
+  const adminEmail = process.env.ADMIN_SEED_EMAIL ?? "admin@flourflour.test";
+  const adminPassword = process.env.ADMIN_SEED_PASSWORD ?? "admin1234";
+  const passwordHash = await bcrypt.hash(adminPassword, 12);
+  await prisma.adminUser.upsert({
+    where: { email: adminEmail },
+    update: { passwordHash },
+    create: {
+      email: adminEmail,
+      passwordHash,
+      displayName: "Admin",
+      role: "ADMIN",
+    },
+  });
+  console.log(`Seeded admin user "${adminEmail}" (dev password: "${adminPassword}", change before real use).`);
 }
 
 main()

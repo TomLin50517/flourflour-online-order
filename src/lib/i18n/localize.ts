@@ -10,3 +10,13 @@ export function pickTranslation<T extends { locale: LocaleCode }>(
     translations.find((t) => t.locale === "ZH_TW")
   );
 }
+
+/** 見 SPEC.md §5.1 OrderItem.nameSnapshot：{ "ZH_TW": "...", "EN": "...", ... } */
+export function toTranslationRecord(
+  translations: { locale: LocaleCode; name: string }[],
+): Record<LocaleCode, string> {
+  return Object.fromEntries(translations.map((t) => [t.locale, t.name])) as Record<
+    LocaleCode,
+    string
+  >;
+}

@@ -3,7 +3,19 @@
   "menu": { "title": "メニュー", "soldOut": "売り切れ", "empty": "現在ご用意できる商品はありません" },
   "product": { "quantity": "数量", "addToCart": "カートに追加", "required": "必須" },
   "cart": { "title": "カート", "empty": "カートは空です", "subtotal": "小計" },
-  "checkout": { "title": "お会計", "payNow": "今すぐ支払う", "agreeTerms": "利用規約に同意します" },
+  "checkout": {
+    "title": "お会計",
+    "payNow": "今すぐ支払う",
+    "agreeTerms": "利用規約に同意します",
+    "name": "お名前（任意）",
+    "phone": "電話番号（任意）",
+    "note": "備考（任意）",
+    "submit": "注文を確定する",
+    "submitting": "送信中…",
+    "orderCreated": "注文が作成されました",
+    "paymentPending": "決済連携は準備中です",
+    "backToMenu": "メニューに戻る"
+  },
   "order": {
     "pickupNumber": "受け取り番号",
     "waitingPayment": "決済完了後に受け取り番号が表示されます",

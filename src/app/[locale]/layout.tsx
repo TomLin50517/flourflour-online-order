@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 import { Header } from "@/components/header";
 import { routing } from "@/i18n/routing";
 import { prisma } from "@/lib/db";
-import "./globals.css";
+import "../globals.css";
 
 export function generateStaticParams() {
   return routing.locales.map((locale) => ({ locale }));

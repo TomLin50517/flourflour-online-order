@@ -211,6 +211,7 @@ model Order {
   storeId       String
   orderNo       String      @unique              // 對外訂單編號 ORD-20260815-0001
   accessToken   String      @unique              // 訪客查單憑證（32 bytes hex）
+  idempotencyKey String     @unique              // 見 docs/OPEN-QUESTIONS.md：SPEC §8.2 要求但原欄位表未列
   status        OrderStatus @default(PENDING_PAYMENT)
   version       Int         @default(0)          // 樂觀鎖
 

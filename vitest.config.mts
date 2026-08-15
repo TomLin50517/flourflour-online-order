@@ -13,5 +13,6 @@ export default defineConfig({
   test: {
     environment: "node",
     passWithNoTests: true,
+    setupFiles: ["./tests/setup.ts"],
   },
 });

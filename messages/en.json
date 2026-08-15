@@ -3,7 +3,19 @@
   "menu": { "title": "Menu", "soldOut": "Sold Out", "empty": "No items available yet" },
   "product": { "quantity": "Quantity", "addToCart": "Add to Cart", "required": "Required" },
   "cart": { "title": "Cart", "empty": "Your cart is empty", "subtotal": "Subtotal" },
-  "checkout": { "title": "Checkout", "payNow": "Pay Now", "agreeTerms": "I agree to the terms of service" },
+  "checkout": {
+    "title": "Checkout",
+    "payNow": "Pay Now",
+    "agreeTerms": "I agree to the terms of service",
+    "name": "Name (optional)",
+    "phone": "Phone (optional)",
+    "note": "Note (optional)",
+    "submit": "Place Order",
+    "submitting": "Submitting…",
+    "orderCreated": "Order created",
+    "paymentPending": "Payment integration is coming soon",
+    "backToMenu": "Back to menu"
+  },
   "order": {
     "pickupNumber": "Pickup Number",
     "waitingPayment": "Your pickup number will appear once payment is complete",
