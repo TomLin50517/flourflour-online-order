@@ -169,3 +169,16 @@
 - 問題：隨著里程碑增加、測試檔數量變多（現有 15 個 Vitest 檔案），`npm run test` 會間歇性（後期變成穩定重現）在 `tests/pickup-number.test.ts` 的「200 筆併發配號」測試噴 `Unable to start a transaction in the given time`。原因是 Vitest 預設把不同測試檔分派到多個平行 worker process，每個 process 各自建立一份 Prisma 連線池（`lib/db.ts` 的 singleton 是 per-process，不是全域共用），多個 process 的連線池加總容易超過本機 Postgres 的 `max_connections`，讓那 200 筆併發交易在等待可用連線時逾時。單獨執行該測試檔則完全不會重現（沒有其他 process 在搶連線）。
 - 暫定假設：在 `vitest.config.mts` 設定 `fileParallelism: false`，讓所有測試檔依序執行、共用同一份連線池，避免連線數爭用；用調小 Vitest 檔案並行度換來測試穩定，執行時間仍在可接受範圍（本機約 3–4 秒）。若之後測試檔數量再大幅增加、依序執行時間變得不可接受，才需要考慮改成調大 Postgres `max_connections` 或改用專屬的測試資料庫連線池設定。
 - 影響範圍：`vitest.config.mts`。
+
+### `bcrypt` 換成 `bcryptjs`，解決 Workers runtime 不支援原生 binding 的問題
+- 里程碑：M6（部署嘗試期間追加）
+- 問題：`src/auth.ts` 的 Credentials provider 用 `bcrypt.compare()` 驗證密碼，`bcrypt` 是原生 C++ binding，Cloudflare Workers runtime 無法載入。這個問題跟先前解決的「Node.js Middleware」是兩回事——middleware 拆分只解決了 `src/proxy.ts` 不再連帶引用 `bcrypt`，但 `src/auth.ts`／`prisma/seed.ts` 這些真正呼叫 `bcrypt.compare()`／`bcrypt.hash()` 的地方本身還是會在 Workers runtime 執行期報錯。
+- 解法：換成 `bcryptjs`（純 JS 實作，同樣的 `$2b$` hash 格式、相容的 `hash()`/`compare()` 簽章），`src/auth.ts` 與 `prisma/seed.ts` 都只改了 import。已用瀏覽器實測驗證兩個方向都正確：(1) 用既有帳號（密碼 hash 是先前用原生 `bcrypt` 產生的）登入，確認 `bcryptjs.compare()` 能讀懂舊 hash；(2) `npm run test` 80 個既有測試全過，`typecheck`/`lint` 全過。
+- 影響範圍：`src/auth.ts`、`prisma/seed.ts`、`package.json`（移除 `bcrypt`/`@types/bcrypt`，新增 `bcryptjs`）。
+
+### `sharp` 換成 `@cf-wasm/photon`，且繞開該套件 `rotate()` 的一個已知 bug
+- 里程碑：M6（部署嘗試期間追加）
+- 問題：`src/lib/image-processing.ts` 的 `reencodeToWebp()` 用 `sharp`（libvips 原生 binding）把上傳圖片轉成 webp、依 EXIF 方向校正、縮到最長邊 1200px、去除 EXIF。`sharp` 同樣是 Workers runtime 不支援的原生 binding。找過的替代方案：`wasm-vips`（用 Emscripten pthreads，Workers 不支援 SharedArrayBuffer/worker threads，官方本身就說「無法在 Cloudflare Workers 執行」）、Cloudflare Images（另一個要付費、要另外串接的 CF 產品，先不考慮）、`@cf-wasm/photon`（把 `photon-rs` 編譯成 WASM，有 `/node`、`/workerd`、`/edge-light` 三種進入點，是三個選項裡唯一能在現有架構、不用額外付費服務就跑起來的）。
+- 過程中發現的實測 bug：`@cf-wasm/photon` 的 `rotate(img, angle)` 在 90/180/270 度時會讓部分色版的中間值（例如 RGB 的 G=200）被錯誤地推到 255，只有呼叫 `rotate()` 之後才會出現，`resize()`/`fliph()`/`flipv()` 單獨使用都正常（用暫時性的驗證腳本、比對 sharp 的 `.rotate()` 輸出逐色塊排查出來的，腳本本身完成驗證後已刪除，不留在 repo 裡）。因為 90/180/270 度旋轉本質上只是精確的像素座標搬移、不需要任何插值，改成直接對 `PhotonImage.get_raw_pixels()` 的 raw RGBA buffer 手動做座標搬移（`rotate90Cw()`），再用 `new PhotonImage(pixels, width, height)` 建回物件，完全繞開 `rotate()`；`fliph()`/`flipv()`（單純鏡射，沒有插值）維持用套件原生函式。已用比對 sharp `.rotate()` 輸出的方式驗證全部 8 種 EXIF orientation 值（1–8）、以及旋轉後還需要再縮放的情境，色塊位置與色值都與 sharp 的既有行為一致（僅有 JPEG 解碼器本身的 1–2 個色階差異，非旋轉邏輯問題）。EXIF orientation tag 本身 `photon` 沒有內建解析，`src/lib/image-processing.ts` 另外手刻了一個只讀 `0x0112` tag 的最小 TIFF/Exif 解析器（只處理 JPEG，PNG/WebP 上傳實務上幾乎不帶方向 EXIF）。
+- 已知取捨（非 bug，是功能落差）：`get_bytes_webp()` 只支援無損 webp，沒有像 `sharp` 那樣的有損品質參數（先前是 quality 82），輸出檔案會比之前大。SPEC §12.1/§12.2 只寫「重新編碼為 webp、去除 EXIF、最長邊 1200px」，沒有規定要有損壓縮或指定檔案大小門檻，所以這個取捨沒有違反 SPEC 文字，但值得記錄：如果之後量測到圖片載入效能是瓶頸，可以考慮換成 `get_bytes_jpeg(quality)`（`photon` 支援品質參數，但格式變成 jpeg 不是 webp）或改接 Cloudflare Images（正式的有損壓縮＋按裝置變體，但要另外付費啟用）。
+- 影響範圍：`src/lib/image-processing.ts`、`tests/image-processing.test.ts`（改用 `PhotonImage` 直接產生測試用圖片，不再依賴 `sharp`；新增手刻 EXIF APP1 段的測試 fixture 產生器，驗證 orientation 校正行為）、`package.json`（移除 `sharp`，新增 `@cf-wasm/photon`）。
