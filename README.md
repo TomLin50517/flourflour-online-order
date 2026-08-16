@@ -46,7 +46,7 @@ npm run stats:rebuild -- --from=2026-08-01 --to=2026-08-31   # 由訂單明細�
 
 ## 測試
 
-- **單元／整合測試**（Vitest）：`npm run test`。直接連本機 Postgres（`docker compose up -d` 需先啟動），覆蓋金額計算、狀態機、取貨號併發配號、建單、webhook 冪等/驗簽/金額比對、銷售統計累加與 `stats:rebuild` 一致性等關鍵路徑。
+- **單元／整合測試**（Vitest）：`npm run test`。固定連本機 Postgres（`docker compose up -d` 需先啟動），覆蓋金額計算、狀態機、取貨號併發配號、建單、webhook 冪等/驗簽/金額比對、銷售統計累加與 `stats:rebuild` 一致性等關鍵路徑。若 `.env` 的 `DATABASE_URL` 已經換成遠端資料庫（例如 Supabase），`tests/setup.ts` 會用 `.env.test`（複製 `.env.test.example`）覆蓋回本機連線，避免併發測試（如 200 筆取貨號配號）因網路延遲逾時、也避免測試資料寫進遠端的開發資料庫。見 `docs/OPEN-QUESTIONS.md`。
 - **E2E 測試**（Playwright）：`npm run test:e2e`。四語系（zh-TW/en/ja/ko）各跑一次完整流程——瀏覽商品 → 選規格 → 加入購物車 → 結帳 → Mock provider 付款 → 取得取貨號 → 後台推進至完成，另外檢查銷售統計頁可正常載入。第一次執行前需要安裝瀏覽器執行檔：
 
   ```bash
