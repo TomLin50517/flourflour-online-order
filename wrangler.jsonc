@@ -10,10 +10,17 @@
   },
   // 見 docs/OPEN-QUESTIONS.md：透過 `npx wrangler hyperdrive create` 建立，
   // 上游接 Supabase 的 Direct connection（見該指令的說明）。
+  // `localConnectionString`：Cloudflare 官方文件證實只有 `wrangler dev`（本機
+  // 開發）會真的拿它去連線，正式部署（`wrangler deploy`）不會使用，`wrangler
+  // dev --remote` 也不會。但 `opennextjs-cloudflare deploy` 內部會呼叫
+  // `getPlatformProxy` 讀一次 env（用途不明，但連正式部署也會觸發這個檢查），
+  // 若沒設這個欄位會直接拋錯擋下整個部署。填本機 docker Postgres 的連線字串，
+  // 純粹是為了讓這個檢查通過、不影響正式環境的實際連線行為。
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "c3e4cf1358434f15a3a425b85826c342"
+      "id": "c3e4cf1358434f15a3a425b85826c342",
+      "localConnectionString": "postgresql://flourflour:flourflour@localhost:5432/flourflour"
     }
   ]
 }
