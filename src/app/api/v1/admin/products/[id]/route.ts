@@ -27,10 +27,10 @@ export async function PATCH(
   context: RouteContext<"/api/v1/admin/products/[id]">,
 ) {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
     const { id } = idParamsSchema.parse(await context.params);
     const body = updateProductSchema.parse(await request.json());
-    const product = await updateProduct(id, body);
+    const product = await updateProduct(id, body, session.user.id);
     return NextResponse.json(product);
   } catch (error) {
     return toErrorResponse(error);
@@ -42,9 +42,9 @@ export async function DELETE(
   context: RouteContext<"/api/v1/admin/products/[id]">,
 ) {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
     const { id } = idParamsSchema.parse(await context.params);
-    await deleteProduct(id);
+    await deleteProduct(id, session.user.id);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return toErrorResponse(error);

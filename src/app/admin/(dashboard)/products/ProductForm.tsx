@@ -70,31 +70,19 @@ export function ProductForm({
     setUploading(true);
     setError(null);
     try {
-      const presignRes = await fetch("/api/v1/admin/uploads/presign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: file.name, contentType: file.type }),
-      });
-      if (!presignRes.ok) throw new Error("取得上傳網址失敗");
-      const { uploadUrl, publicUrl } = await presignRes.json();
+      // 見 docs/OPEN-QUESTIONS.md：檔案直接上傳到伺服器，由伺服器驗證內容
+      // （magic bytes）並轉檔為 webp，不再走 presigned URL 直傳 S3。
+      const body = new FormData();
+      body.append("file", file);
 
-      const putRes = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type },
-        body: file,
-      });
-      if (!putRes.ok) throw new Error("上傳失敗");
+      const res = await fetch("/api/v1/admin/uploads", { method: "POST", body });
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => null);
+        throw new Error(errorBody?.error?.message ?? "上傳失敗");
+      }
+      const { url, width, height } = await res.json();
 
-      const dimensions = await new Promise<{ width: number; height: number }>((resolve) => {
-        const img = new Image();
-        img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-        img.src = URL.createObjectURL(file);
-      });
-
-      setImages((prev) => [
-        ...prev,
-        { url: publicUrl, width: dimensions.width, height: dimensions.height, isPrimary: prev.length === 0 },
-      ]);
+      setImages((prev) => [...prev, { url, width, height, isPrimary: prev.length === 0 }]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "上傳失敗");
     } finally {

@@ -1,32 +1,57 @@
+import { randomUUID } from "node:crypto";
 import createIntlMiddleware from "next-intl/middleware";
 import { NextResponse } from "next/server";
 import { auth } from "./auth";
 import { routing } from "./i18n/routing";
+import { applySecurityHeaders } from "./lib/security-headers";
 
 const handleIntl = createIntlMiddleware(routing);
 
 // 見 SPEC.md §4.2：/admin/* 固定 zh-TW，不走語系協商，改由 session 保護。
+// 見 SPEC.md §12.1：安全標頭統一於 middleware 設定，含 /api/* 在內，故 matcher
+// 不再排除 api（僅排除 _next/_vercel/靜態檔），下面針對 /api 另外提早 return，
+// 避免它被 next-intl 的語系協商邏輯誤判為頁面路徑。
+// 見 SPEC.md §12.3：requestId 由 middleware 產生並貫穿。/api、/admin 分支會把
+// requestId 一併寫回請求標頭，讓 route handler 可用 `request.headers.get("x-request-id")`
+// 取得；next-intl 分支的回應是由它自己內部建構，這裡不強行改寫其請求物件，
+// 僅保證回應標頭一定帶得到（供瀏覽器端/支援排查關聯用）。
 export default auth((request) => {
+  const requestId = request.headers.get("x-request-id") ?? randomUUID();
   const { pathname } = request.nextUrl;
+
+  function decorate<T extends NextResponse>(response: T): T {
+    response.headers.set("x-request-id", requestId);
+    return applySecurityHeaders(response);
+  }
+
+  function nextWithRequestId(): NextResponse {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-request-id", requestId);
+    return decorate(NextResponse.next({ request: { headers: requestHeaders } }));
+  }
+
+  if (pathname.startsWith("/api")) {
+    return nextWithRequestId();
+  }
 
   if (pathname.startsWith("/admin")) {
     if (pathname === "/admin/login") {
-      return NextResponse.next();
+      return nextWithRequestId();
     }
     if (!request.auth) {
-      return NextResponse.redirect(new URL("/admin/login", request.nextUrl));
+      return decorate(NextResponse.redirect(new URL("/admin/login", request.nextUrl)));
     }
-    return NextResponse.next();
+    return nextWithRequestId();
   }
 
   // 見 SPEC.md §7.4：/dev/mock-pay 是開發用頁面，不走語系協商（本身以 NODE_ENV 自我限制註冊）。
   if (pathname.startsWith("/dev")) {
-    return NextResponse.next();
+    return nextWithRequestId();
   }
 
-  return handleIntl(request);
+  return decorate(handleIntl(request));
 });
 
 export const config = {
-  matcher: ["/((?!api|_next|_vercel|.*\\..*).*)"],
+  matcher: ["/((?!_next|_vercel|.*\\..*).*)"],
 };

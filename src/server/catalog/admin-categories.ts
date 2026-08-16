@@ -2,6 +2,7 @@ import { revalidateTag } from "next/cache";
 import { prisma } from "@/lib/db";
 import { NotFoundError } from "@/lib/errors";
 import { toDbLocale, type Locale } from "@/lib/i18n/locale-map";
+import { writeAuditLog } from "@/server/admin/audit-log";
 
 type CategoryTranslationInput = { locale: Locale; name: string };
 
@@ -21,11 +22,14 @@ export async function listCategoriesAdmin() {
   });
 }
 
-export async function createCategory(input: {
-  slug: string;
-  sortOrder?: number;
-  translations: CategoryTranslationInput[];
-}) {
+export async function createCategory(
+  input: {
+    slug: string;
+    sortOrder?: number;
+    translations: CategoryTranslationInput[];
+  },
+  actorId: string,
+) {
   const store = await prisma.store.findFirstOrThrow();
   const category = await prisma.category.create({
     data: {
@@ -37,6 +41,7 @@ export async function createCategory(input: {
     include: { translations: true },
   });
   revalidateTag("menu", { expire: 0 });
+  await writeAuditLog({ actorId, action: "category.create", targetType: "Category", targetId: category.id, diff: input });
   return category;
 }
 
@@ -48,6 +53,7 @@ export async function updateCategory(
     isActive?: boolean;
     translations?: CategoryTranslationInput[];
   },
+  actorId: string,
 ) {
   const existing = await prisma.category.findUnique({ where: { id } });
   if (!existing) throw new NotFoundError("分類不存在");
@@ -70,10 +76,11 @@ export async function updateCategory(
     });
   });
   revalidateTag("menu", { expire: 0 });
+  await writeAuditLog({ actorId, action: "category.update", targetType: "Category", targetId: id, diff: input });
   return category;
 }
 
-export async function deleteCategory(id: string) {
+export async function deleteCategory(id: string, actorId: string) {
   const existing = await prisma.category.findUnique({ where: { id } });
   if (!existing) throw new NotFoundError("分類不存在");
   // 商品的 categoryId 為可選欄位，刪除分類前先解除關聯，避免外鍵限制擋下操作
@@ -82,4 +89,5 @@ export async function deleteCategory(id: string) {
     prisma.category.delete({ where: { id } }),
   ]);
   revalidateTag("menu", { expire: 0 });
+  await writeAuditLog({ actorId, action: "category.delete", targetType: "Category", targetId: id });
 }

@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { LocaleCode } from "../src/generated/prisma/enums";
+import { BCRYPT_COST } from "../src/lib/password";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -307,7 +308,7 @@ async function main() {
 
   const adminEmail = process.env.ADMIN_SEED_EMAIL ?? "admin@flourflour.test";
   const adminPassword = process.env.ADMIN_SEED_PASSWORD ?? "admin1234";
-  const passwordHash = await bcrypt.hash(adminPassword, 12);
+  const passwordHash = await bcrypt.hash(adminPassword, BCRYPT_COST);
   await prisma.adminUser.upsert({
     where: { email: adminEmail },
     update: { passwordHash },

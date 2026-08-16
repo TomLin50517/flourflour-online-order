@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
+import { logger } from "@/lib/logger";
 
 // 見 SPEC.md §8.1 錯誤碼列表
 export const ERROR_CODES = [
@@ -68,8 +69,17 @@ export class NotImplementedError extends Error {
   }
 }
 
-export function toErrorResponse(error: unknown): NextResponse {
+// 見 SPEC.md §12.3：需要告警的事件之一是「狀態機非法轉移」「AMOUNT_MISMATCH」——
+// 兩者都會走到這裡（每個 route handler 的 catch 區塊都呼叫 toErrorResponse），
+// 是唯一一個所有錯誤路徑都會經過的地方，故把告警邏輯集中在此，不必逐一改寫
+// 三十幾個 route handler。
+const ALERT_ON_CODES: ReadonlySet<ErrorCode> = new Set(["AMOUNT_MISMATCH", "INVALID_STATE_TRANSITION"]);
+
+export function toErrorResponse(error: unknown, requestId?: string): NextResponse {
   if (error instanceof AppError) {
+    if (ALERT_ON_CODES.has(error.code)) {
+      logger.alert(`${error.code}`, { code: error.code, message: error.message, details: error.details, requestId });
+    }
     return NextResponse.json(
       { error: { code: error.code, message: error.message, details: error.details ?? {} } },
       { status: STATUS_BY_CODE[error.code] },
@@ -90,6 +100,8 @@ export function toErrorResponse(error: unknown): NextResponse {
   }
 
   if (error instanceof NotImplementedError) {
+    // 見 SPEC.md §12.3：NotImplementedError 被觸發是需要告警的事件之一。
+    logger.alert("NotImplementedError", { message: error.message, requestId });
     return NextResponse.json(
       {
         error: {
@@ -102,7 +114,13 @@ export function toErrorResponse(error: unknown): NextResponse {
     );
   }
 
-  console.error(error);
+  logger.error("Unhandled error", {
+    requestId,
+    error:
+      error instanceof Error
+        ? { name: error.name, message: error.message, stack: error.stack }
+        : error,
+  });
   return NextResponse.json(
     { error: { code: "INTERNAL_ERROR" satisfies ErrorCode, message: "系統忙碌，請稍後再試", details: {} } },
     { status: STATUS_BY_CODE.INTERNAL_ERROR },

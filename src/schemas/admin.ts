@@ -123,8 +123,3 @@ export const statsSummaryQuerySchema = z.object({
   from: isoDateSchema.optional(),
   to: isoDateSchema.optional(),
 });
-
-export const uploadPresignSchema = z.object({
-  filename: z.string().min(1),
-  contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
-});

@@ -9,10 +9,10 @@ export async function PATCH(
   context: RouteContext<"/api/v1/admin/option-groups/[id]">,
 ) {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
     const { id } = idParamsSchema.parse(await context.params);
     const body = updateOptionGroupSchema.parse(await request.json());
-    const group = await updateOptionGroup(id, body);
+    const group = await updateOptionGroup(id, body, session.user.id);
     return NextResponse.json(group);
   } catch (error) {
     return toErrorResponse(error);
@@ -24,9 +24,9 @@ export async function DELETE(
   context: RouteContext<"/api/v1/admin/option-groups/[id]">,
 ) {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
     const { id } = idParamsSchema.parse(await context.params);
-    await deleteOptionGroup(id);
+    await deleteOptionGroup(id, session.user.id);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return toErrorResponse(error);

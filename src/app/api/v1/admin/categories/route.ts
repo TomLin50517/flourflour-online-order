@@ -16,9 +16,9 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
     const body = createCategorySchema.parse(await request.json());
-    const category = await createCategory(body);
+    const category = await createCategory(body, session.user.id);
     return NextResponse.json(category, { status: 201 });
   } catch (error) {
     return toErrorResponse(error);

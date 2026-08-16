@@ -132,7 +132,7 @@ export default function CartPage() {
           <li key={line.index} className="flex gap-3 border-b pb-4">
             <div className="relative size-16 shrink-0 overflow-hidden rounded-md bg-muted">
               {line.imageUrl && (
-                <Image src={line.imageUrl} alt={line.name} fill className="object-cover" />
+                <Image src={line.imageUrl} alt={line.name} fill sizes="64px" className="object-cover" />
               )}
             </div>
             <div className="flex flex-1 flex-col gap-1">

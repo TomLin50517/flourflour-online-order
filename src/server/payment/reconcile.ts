@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { logger } from "@/lib/logger";
 import { getPaymentProvider } from "@/lib/payment/registry";
 import type { ProviderCode } from "@/lib/payment/types";
 import { assignPickupNumber } from "@/server/order/pickup-number";
@@ -33,7 +34,10 @@ export async function reconcilePendingPayments(now: Date = new Date()) {
       queried = await provider.queryCharge(payment.providerRef);
     } catch (error) {
       // 廠商 adapter 未實作（NotImplementedError）或查詢暫時失敗：留給下一輪重試。
-      console.error("reconcilePendingPayments: queryCharge failed", { orderNo: order.orderNo, error });
+      logger.warn("reconcilePendingPayments: queryCharge failed", {
+        orderNo: order.orderNo,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+      });
       continue;
     }
 

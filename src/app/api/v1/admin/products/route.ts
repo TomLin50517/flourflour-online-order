@@ -23,9 +23,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
     const body = createProductSchema.parse(await request.json());
-    const product = await createProduct(body);
+    const product = await createProduct(body, session.user.id);
     return NextResponse.json(product, { status: 201 });
   } catch (error) {
     return toErrorResponse(error);

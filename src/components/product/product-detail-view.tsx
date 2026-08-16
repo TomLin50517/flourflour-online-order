@@ -88,6 +88,7 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
             alt={product.images[0].alt}
             fill
             priority
+            sizes="100vw"
             className="object-cover"
           />
         </div>

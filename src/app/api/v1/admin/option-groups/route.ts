@@ -16,9 +16,9 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
     const body = createOptionGroupSchema.parse(await request.json());
-    const group = await createOptionGroup(body);
+    const group = await createOptionGroup(body, session.user.id);
     return NextResponse.json(group, { status: 201 });
   } catch (error) {
     return toErrorResponse(error);

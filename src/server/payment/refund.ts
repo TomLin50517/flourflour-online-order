@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { getPaymentProvider } from "@/lib/payment/registry";
 import type { ProviderCode } from "@/lib/payment/types";
+import { writeAuditLog } from "@/server/admin/audit-log";
 import { transition } from "@/server/order/state-machine";
 import { applyDailyProductSales } from "@/server/stats/daily-product-sales";
 
@@ -54,13 +55,13 @@ export async function refundOrder(input: {
     throw new AppError("CONFLICT", "廠商拒絕此筆退款", { providerRef: payment.providerRef });
   }
 
-  return prisma.$transaction(async (tx) => {
+  const refunded = await prisma.$transaction(async (tx) => {
     await tx.payment.update({
       where: { id: payment.id },
       data: { status: "REFUNDED", refundedAt: new Date() },
     });
 
-    const refunded = await transition({
+    const result = await transition({
       tx,
       orderId: order.id,
       expectedVersion: input.expectedVersion,
@@ -75,6 +76,16 @@ export async function refundOrder(input: {
     const items = await tx.orderItem.findMany({ where: { orderId: order.id } });
     await applyDailyProductSales(tx, "REFUNDED", { storeId: order.storeId, businessDate, items });
 
-    return refunded;
+    return result;
   });
+
+  await writeAuditLog({
+    actorId: input.actorId,
+    action: "order.refund",
+    targetType: "Order",
+    targetId: order.id,
+    diff: { reason: input.reason, providerRef: payment.providerRef },
+  });
+
+  return refunded;
 }

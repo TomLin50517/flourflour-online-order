@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { toErrorResponse } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import { isProviderCode } from "@/lib/payment/registry";
 import type { RawWebhook } from "@/lib/payment/types";
 import { webhookProviderParamsSchema } from "@/schemas/payment";
@@ -47,6 +48,11 @@ export async function POST(
     return NextResponse.json({ received: true, outcome }, { status: 200 });
   } catch (error) {
     if (error instanceof WebhookSignatureError) {
+      // 見 SPEC.md §12.3：webhook 驗簽失敗是需要告警的事件之一。
+      logger.alert("webhook signature verification failed", {
+        message: error.message,
+        requestId: request.headers.get("x-request-id") ?? undefined,
+      });
       return NextResponse.json(
         { error: { code: "VALIDATION_FAILED", message: error.message } },
         { status: 400 },
@@ -57,7 +63,10 @@ export async function POST(
     }
     // 見 SPEC.md §7.5 關鍵原則 4：webhook 一律回 200（除非驗簽失敗），避免廠商無限重送；
     // 失敗細節已於 handlePaymentWebhook 內部記錄，PaymentEvent.processedAt 會維持 null 供補償 job 重試。
-    console.error("payment webhook unexpected error", error);
+    logger.error("payment webhook unexpected error", {
+      error: error instanceof Error ? { name: error.name, message: error.message } : error,
+      requestId: request.headers.get("x-request-id") ?? undefined,
+    });
     return NextResponse.json({ received: true }, { status: 200 });
   }
 }

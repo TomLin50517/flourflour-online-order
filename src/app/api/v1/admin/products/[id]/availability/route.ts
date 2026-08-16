@@ -9,10 +9,10 @@ export async function PATCH(
   context: RouteContext<"/api/v1/admin/products/[id]/availability">,
 ) {
   try {
-    await requireStaff();
+    const session = await requireStaff();
     const { id } = idParamsSchema.parse(await context.params);
     const body = productAvailabilitySchema.parse(await request.json());
-    const product = await updateProductAvailability(id, body);
+    const product = await updateProductAvailability(id, body, session.user.id);
     return NextResponse.json(product);
   } catch (error) {
     return toErrorResponse(error);

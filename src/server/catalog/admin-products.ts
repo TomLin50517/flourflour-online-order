@@ -3,6 +3,7 @@ import { LOCALES } from "@/lib/i18n/locale-map";
 import { toDbLocale, type Locale } from "@/lib/i18n/locale-map";
 import { prisma } from "@/lib/db";
 import { NotFoundError, ValidationError } from "@/lib/errors";
+import { writeAuditLog } from "@/server/admin/audit-log";
 
 type TranslationInput = { locale: Locale; name: string; description?: string };
 type ImageInput = {
@@ -97,20 +98,23 @@ function assertActivationInvariants(
   }
 }
 
-export async function createProduct(input: {
-  slug: string;
-  sku?: string;
-  categoryId?: string;
-  basePrice: number;
-  sortOrder?: number;
-  translations: TranslationInput[];
-  optionGroupIds: string[];
-}) {
+export async function createProduct(
+  input: {
+    slug: string;
+    sku?: string;
+    categoryId?: string;
+    basePrice: number;
+    sortOrder?: number;
+    translations: TranslationInput[];
+    optionGroupIds: string[];
+  },
+  actorId: string,
+) {
   assertFourTranslations(input.translations);
   const store = await prisma.store.findFirstOrThrow();
   const optionGroupBindings = await buildOptionGroupBindings(input.optionGroupIds);
 
-  return prisma.product.create({
+  const product = await prisma.product.create({
     data: {
       storeId: store.id,
       slug: input.slug,
@@ -124,6 +128,8 @@ export async function createProduct(input: {
     },
     include: { translations: true, images: true, optionGroups: true },
   });
+  await writeAuditLog({ actorId, action: "product.create", targetType: "Product", targetId: product.id, diff: input });
+  return product;
 }
 
 /**
@@ -159,6 +165,7 @@ export async function updateProduct(
     optionGroupIds?: string[];
     images?: ImageInput[];
   },
+  actorId: string,
 ) {
   const existing = await prisma.product.findUnique({
     where: { id },
@@ -219,12 +226,14 @@ export async function updateProduct(
     });
   });
   revalidateTag("menu", { expire: 0 });
+  await writeAuditLog({ actorId, action: "product.update", targetType: "Product", targetId: id, diff: input });
   return result;
 }
 
 export async function updateProductAvailability(
   id: string,
   input: { isActive?: boolean; isSoldOut?: boolean },
+  actorId: string,
 ) {
   const existing = await prisma.product.findUnique({
     where: { id },
@@ -241,10 +250,17 @@ export async function updateProductAvailability(
     data: { isActive: input.isActive, isSoldOut: input.isSoldOut },
   });
   revalidateTag("menu", { expire: 0 });
+  await writeAuditLog({
+    actorId,
+    action: "product.availability",
+    targetType: "Product",
+    targetId: id,
+    diff: input,
+  });
   return result;
 }
 
-export async function deleteProduct(id: string) {
+export async function deleteProduct(id: string, actorId: string) {
   const existing = await prisma.product.findUnique({ where: { id } });
   if (!existing) throw new NotFoundError("商品不存在");
   // 見 SPEC.md INV-7：一律軟刪除
@@ -253,6 +269,7 @@ export async function deleteProduct(id: string) {
     data: { deletedAt: new Date(), isActive: false },
   });
   revalidateTag("menu", { expire: 0 });
+  await writeAuditLog({ actorId, action: "product.delete", targetType: "Product", targetId: id });
 }
 
 export async function listMissingTranslations() {

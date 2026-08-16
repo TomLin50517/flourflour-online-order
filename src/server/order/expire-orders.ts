@@ -1,5 +1,11 @@
 import { prisma } from "@/lib/db";
+import { logger } from "@/lib/logger";
 import { ConflictError, InvalidStateTransitionError, transition } from "./state-machine";
+
+const TIMEOUT_CANCEL_REASON = "未於時限內完成付款";
+const ALERT_WINDOW_MS = 60 * 60 * 1000; // 近一小時
+const ALERT_MIN_SAMPLE = 5; // 樣本太小時比例沒有統計意義，不告警
+const ALERT_THRESHOLD = 0.2;
 
 /**
  * 見 SPEC.md §7.5、§13 M4：逾時 job。掃描 expiresAt 已過的 PENDING_PAYMENT 訂單並轉為 CANCELLED。
@@ -24,8 +30,8 @@ export async function expireOverdueOrders(now: Date = new Date()) {
           expectedVersion: order.version,
           toStatus: "CANCELLED",
           actorType: "SYSTEM",
-          note: "未於時限內完成付款",
-          extraData: { cancelledAt: now, cancelReason: "未於時限內完成付款" },
+          note: TIMEOUT_CANCEL_REASON,
+          extraData: { cancelledAt: now, cancelReason: TIMEOUT_CANCEL_REASON },
         }),
       );
       cancelled += 1;
@@ -36,6 +42,32 @@ export async function expireOverdueOrders(now: Date = new Date()) {
         continue;
       }
       throw error;
+    }
+  }
+
+  // 見 SPEC.md §12.3：PENDING_PAYMENT 逾時率 > 20% 需要告警。以「近一小時內下的
+  // 訂單」為樣本，比較其中最終因逾時被取消的比例；樣本數太小（< 5）時比例沒有
+  // 統計意義，不告警，避免深夜低流量時段誤報。
+  const windowStart = new Date(now.getTime() - ALERT_WINDOW_MS);
+  const [totalPlaced, totalTimedOut] = await Promise.all([
+    prisma.order.count({ where: { placedAt: { gte: windowStart, lte: now } } }),
+    prisma.order.count({
+      where: {
+        placedAt: { gte: windowStart, lte: now },
+        status: "CANCELLED",
+        cancelReason: TIMEOUT_CANCEL_REASON,
+      },
+    }),
+  ]);
+  if (totalPlaced >= ALERT_MIN_SAMPLE) {
+    const timeoutRate = totalTimedOut / totalPlaced;
+    if (timeoutRate > ALERT_THRESHOLD) {
+      logger.alert("PENDING_PAYMENT timeout rate exceeded 20%", {
+        timeoutRatePercent: Math.round(timeoutRate * 1000) / 10,
+        totalPlaced,
+        totalTimedOut,
+        windowMinutes: ALERT_WINDOW_MS / 60_000,
+      });
     }
   }
 

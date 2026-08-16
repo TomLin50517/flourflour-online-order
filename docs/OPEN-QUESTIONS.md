@@ -26,11 +26,11 @@
 - 暫定假設：在 `Order` 加一個 `idempotencyKey String @unique` 欄位（migration `add_order_idempotency_key`），`POST /orders` 用它做查重。這是新增欄位、不是修改既有欄位語意，應該不牴觸「欄位語意不得變更」的限制。
 - 影響範圍：`prisma/schema.prisma`（新欄位）、`prisma/migrations/20260815182441_add_order_idempotency_key/`、`src/server/order/create-order.ts`（用它查重＋寫入）。
 
-### 後台登入未實作速率限制／鎖定機制
-- 里程碑：M3
+### 後台登入未實作速率限制／鎖定機制 — 已於 M6 解決
+- 里程碑：M3 → M6（已解決）
 - 問題：SPEC §10.1「失敗 5 次鎖定 15 分鐘（以 IP + email 計數）」與 §12.1「/admin/login 每 IP 5 次/分」都還沒做。目前 `src/auth.ts` 的 Credentials `authorize()` 只有帳密驗證，沒有失敗計數或鎖定。
-- 暫定假設：M3 先求登入功能本身正確（bcrypt 比對、session、middleware 保護），鎖定機制留到之後補——單機開發階段用記憶體 Map 就能做，但正式多執行緒/多副本部署需要 Redis 之類的共享儲存，值得等部署方式確定後一起做，避免現在做的東西之後要重寫。
-- 影響範圍：`src/auth.ts`。
+- 解法：`src/lib/rate-limit.ts`（固定視窗限流）與 `src/lib/login-guard.ts`（IP+email 失敗計數與鎖定）都是記憶體內實作，在 `authorize()` 裡依序檢查。`POST /api/v1/orders` 的 10 次/分限流也用同一個 `checkRateLimit()`。**仍是單一 process 記憶體內狀態**——多副本部署時每個副本會各自計數，等於實際限制寬鬆了 N 倍（N=副本數），且重啟會重置計數。這在單一 process 部署（目前的開發/測試環境）下完全正確，但正式多副本部署前，需要換成 Redis 之類的共享儲存才能維持限流的正確性；這是刻意的技術債，換掉的時機等部署拓樸（是否用 Cloudflare Workers、是否會多副本水平擴展）確定後再處理，避免現在猜錯方向。
+- 影響範圍：`src/lib/rate-limit.ts`、`src/lib/login-guard.ts`、`src/auth.ts`、`src/app/api/v1/orders/route.ts`。
 
 ### REFUNDED 轉移目前一律回 503（PaymentProvider 尚未存在）— 已於 M4 解決
 - 里程碑：M3 → M4（已解決）
@@ -103,3 +103,57 @@
 - 問題：SPEC §10.5 只寫「佔比」，沒說是佔銷售數量、淨數量還是金額的比例；也沒規定 CSV 匯出與雙軸折線圖／Top 10 長條圖要不要用套件實作。
 - 暫定假設：「佔比」＝該商品淨數量佔區間內【全部商品淨數量總和】的比例，與表格預設排序欄位（淨數量）一致，前端不需要額外算兩套百分比。CSV（`src/lib/csv.ts`）與兩張圖表（`src/app/admin/(dashboard)/stats/{TrendChart,TopProductsChart}.tsx`）都刻意不引入新套件（`papaparse`、`recharts` 之類）——專案目前完全沒有圖表/CSV 相關依賴（見 `package.json`），只為兩張簡單圖表和一個字串產生器新增依賴不划算，手刻的 inline SVG／CSV 字串已足夠涵蓋 SPEC 需求。
 - 影響範圍：`src/server/stats/report.ts`、`src/lib/csv.ts`、`src/app/admin/(dashboard)/stats/*`。
+
+### 圖片上傳從 presigned URL 直傳改成伺服器代理上傳
+- 里程碑：M6
+- 問題：SPEC §8.3 描述的 `POST /admin/uploads/presign` 是讓瀏覽器直接 PUT 到 S3/MinIO 的 presigned URL 流程，伺服器完全不會看到檔案內容；但 §12.1 同時要求「驗證 magic bytes 而非僅副檔名」、「圖片重新編碼為 webp 去除 EXIF」。這兩個要求互斥——presigned 直傳的整個設計目的就是讓檔案不經過伺服器，沒有任何時間點能讓伺服器檢查或轉換內容。
+- 暫定假設：拿掉 presign 端點，改成 `POST /api/v1/admin/uploads` 用 `multipart/form-data` 把檔案傳給伺服器，伺服器驗證 magic bytes（`src/lib/image-processing.ts` 的 `detectImageType`）、用 `sharp` 轉成 webp（去 EXIF、最長邊 1200px）後才寫入 S3/MinIO。犧牲的是「檔案不經過我方伺服器」這個 presigned URL 的效能優勢，換取安全性要求；後台商品圖片上傳的頻率與檔案大小（≤5MB）都很小，這個取捨划算。
+- 影響範圍：`src/app/api/v1/admin/uploads/route.ts`（取代原本的 `uploads/presign/route.ts`）、`src/lib/image-processing.ts`、`src/app/admin/(dashboard)/products/ProductForm.tsx`、`src/schemas/admin.ts`（移除 `uploadPresignSchema`）。新增 `sharp` 依賴。
+
+### 告警（alerting）目前只有結構化日誌，沒有串接外部通知
+- 里程碑：M6
+- 問題：SPEC §12.3 列出五種需要告警的事件（webhook 驗簽失敗、AMOUNT_MISMATCH、狀態機非法轉移、PENDING_PAYMENT 逾時率 > 20%、NotImplementedError 被觸發），但沒有指定要串接哪個告警管道（Slack/PagerDuty/Email…），專案也還沒有這類整合。
+- 暫定假設：新增 `src/lib/logger.ts` 的 `logger.alert()` 這個獨立 log level，五個事件都會呼叫它（其中四個集中在 `src/lib/errors.ts` 的 `toErrorResponse()`——這是所有 route handler 錯誤處理的唯一共同入口，故把 `AMOUNT_MISMATCH`／`INVALID_STATE_TRANSITION`／`NotImplementedError` 的告警邏輯集中寫在這裡，不必逐一修改三十幾個 route handler；webhook 驗簽失敗的判斷點不在這裡，另外在 `payments/webhook/[provider]/route.ts` 呼叫；逾時率則在 `expire-orders.ts` 的 job 執行完後計算）。輸出仍是結構化 JSON 印到 stdout/stderr，讓日誌收集系統（不論最後接的是 Datadog、CloudWatch、還是 Cloudflare Logs）可以依 `level="alert"` 設條件式通知規則。實際要不要接、接哪個通知管道，等正式維運需求明確後再做。
+- 影響範圍：`src/lib/logger.ts`、`src/lib/errors.ts`、`src/app/api/v1/payments/webhook/[provider]/route.ts`、`src/server/order/expire-orders.ts`。
+
+### requestId 只貫穿到 route handler 層，沒有逐一改寫每個呼叫端寫進 log
+- 里程碑：M6
+- 問題：SPEC §12.3「結構化日誌含 requestId（middleware 產生並貫穿）」——理論上每一筆 log 都該帶 requestId，但專案裡呼叫 `logger.*()` 的地方分散在三十幾個檔案，逐一把 `request.headers.get("x-request-id")` 傳進每個呼叫點是大量機械式改動，價值與工作量不成比例。
+- 暫定假設：`src/proxy.ts` 產生 requestId 並寫回請求標頭（`/api`、`/admin` 分支）與回應標頭（全部分支），任何 route handler 都可以透過 `request.headers.get("x-request-id")` 取得；`src/lib/errors.ts` 的 `toErrorResponse()` 支援可選的 `requestId` 參數，但**沒有**強制所有呼叫端都傳。也就是說 requestId 的基礎建設就位、瀏覽器端／技術支援排查可以靠回應標頭關聯請求，但目前只有少數幾處（webhook 簽章失敗）真的把它寫進 log 內容。之後若要求「每一筆告警 log 都要有 requestId」，需要另外排時間做這個機械式改動。
+- 影響範圍：`src/proxy.ts`、`src/lib/errors.ts`、`src/app/api/v1/payments/webhook/[provider]/route.ts`。
+
+### AuditLog 是 fire-and-forget、不含 IP、且跟 OrderEvent 有意重疊
+- 里程碑：M6
+- 問題：SPEC §12.1「所有寫入操作記 AuditLog」沒有規定寫入時機（要不要包進同一筆交易）、要不要記錄操作者 IP，也沒說訂單狀態轉移該不該同時寫 `OrderEvent`（既有機制，見 `state-machine.ts`）跟 `AuditLog`。
+- 暫定假設：`writeAuditLog()`（`src/server/admin/audit-log.ts`）刻意做成獨立寫入、不包進主要操作的資料庫交易——稽核記錄失敗不該讓商品/訂單的正常寫入跟著失敗，且大部分 CRUD 呼叫端本身沒有走 `$transaction`。`ip` 欄位（schema 已有）目前一律留空——要填就得把 IP 一路從 route handler 傳進每個 server 函式，跟 requestId 一樣是機械式改動，先不做。訂單狀態轉移／退款會**同時**寫 `OrderEvent`（狀態機層級細節：from/to/actorType）跟 `AuditLog`（讓管理者能在同一張表跨實體類型查詢，不用為了看「誰改了這筆訂單」另外去查 OrderEvent）——這是刻意的重複，不是疏漏。
+- 影響範圍：`src/server/admin/audit-log.ts`、`src/server/catalog/admin-{products,categories,option-groups}.ts`、`src/server/order/admin-orders.ts`、`src/server/payment/refund.ts`。目前沒有後台頁面可以瀏覽 AuditLog（只能用 `prisma studio` 或直接查資料庫），UI 留待有實際稽核需求時再做。
+
+### CSP 用 `unsafe-inline`，沒有做 nonce-based CSP
+- 里程碑：M6
+- 問題：嚴格的 CSP（不含 `unsafe-inline`）能更有效防禦 XSS，但 Next.js App Router 的 hydration/RSC 內嵌 script、以及專案裡手刻圖表元件（`TrendChart`/`TopProductsChart`）用到的 React inline `style` prop，都需要 `unsafe-inline` 才能運作；要收緊成 nonce-based CSP，需要在 middleware 產生 nonce、透過 `x-nonce` 請求標頭傳遞，並讓所有會渲染 inline script/style 的地方讀取並套用同一個 nonce，是有一定工作量的架構調整。
+- 暫定假設：`src/lib/security-headers.ts` 的 CSP 對 `script-src`/`style-src` 都用 `'unsafe-inline'`，開發模式（`NODE_ENV !== "production"`）另外放行 `'unsafe-eval'`（React Fast Refresh 需要，正式環境不會用到，React 官方文件本身也這樣說明）。CSP 其餘方向（`default-src 'self'`、`frame-ancestors 'none'`、`connect-src 'self'`…）仍收得很緊，X-Frame-Options/X-Content-Type-Options/Referrer-Policy/HSTS 都有設定，屬於「先把大部分防護做到位」的務實選擇，不是忽略這個問題；nonce-based CSP 留待之後有資源時再做。
+- 影響範圍：`src/lib/security-headers.ts`。
+
+### PENDING_PAYMENT 逾時率告警的計算窗口是自訂的（SPEC 沒有明確定義）
+- 里程碑：M6
+- 問題：SPEC §12.3 只寫「PENDING_PAYMENT 逾時率 > 20%」，沒有定義是用什麼時間窗口計算比例、多小的樣本數不該告警。
+- 暫定假設：在 `expireOverdueOrders()`（`src/server/order/expire-orders.ts`）跑完取消迴圈後，額外查「近一小時內下的訂單」為樣本，比較其中最終因逾時被取消的比例；樣本數 < 5 時不告警（避免深夜低流量時段幾筆訂單就誤報）。這個 job 目前靠外部 cron 呼叫 `POST /api/v1/admin/jobs/expire-orders` 觸發（見 M4 的 OPEN-QUESTIONS 說明），故告警的檢查頻率等於外部 cron 設定的頻率，不是固定每小時。
+- 影響範圍：`src/server/order/expire-orders.ts`。
+
+### `next.config.ts` 的 `deviceSizes` 依上傳流程的固定限制收窄
+- 里程碑：M6
+- 問題：Next.js 預設 `deviceSizes` 含 1920/2048/3840 這些大尺寸斷點，但專案的圖片上傳流程（見上方「圖片上傳」條目）已經統一把所有圖片轉成最長邊 1200px 的 webp，這些大尺寸斷點永遠用不到。
+- 暫定假設：把 `deviceSizes` 收窄成 `[640, 750, 828, 1080, 1200]`，避免 Next.js image optimizer 為根本不存在的大尺寸來源產生用不到的圖片變體。這是直接由專案自己的上傳限制反推出的收斂，如果之後允許使用者上傳/引用外部大圖（目前沒有這個功能），需要重新評估。
+- 影響範圍：`next.config.ts`。
+
+### Playwright 測試檔沒辦法直接用 Prisma；E2E 資料清理另外用 tsx 腳本
+- 里程碑：M6
+- 問題：Playwright Test 用自己的 CJS-based loader 執行測試檔，Prisma 產生的 client 是純 ESM（`generator client { provider = "prisma-client" }`，見 `prisma/schema.prisma`），在 `tests/e2e/order-flow.spec.ts` 裡不管是靜態 `import` 還是動態 `import()` 引用 `@/lib/db`，都會在執行期噴 `SyntaxError: Cannot use 'import.meta' outside a module`——Playwright 的 loader 會攔截所有 import 路徑，不只是靜態的。
+- 暫定假設：E2E 測試本身不在測試檔內做資料庫層級的清理（用瀏覽器操作走完整流程即可，不需要 Prisma），另外寫一支 `scripts/cleanup-e2e-data.ts`（用 `tsx` 執行，已驗證能正常載入 ESM），依 `customerNote = "PLAYWRIGHT_E2E_TEST"` 標記清掉殘留訂單，`npm run test:e2e:cleanup` 執行。另外，後台操作（登入、推進訂單狀態、看統計頁）改成整個測試檔只登入一次、用 Playwright 的 `storageState` 重用已登入的 context，除了避開這個 ESM/CJS 問題本身無關的併發登入問題外，也順便避開 M6 新增的 `/admin/login` 限流（5 次/分）——四語系測試若各自重新登入會在一分鐘內打滿限流額度。
+- 影響範圍：`tests/e2e/order-flow.spec.ts`、`scripts/cleanup-e2e-data.ts`、`vitest.config.mts`（需排除 `tests/e2e/**`，否則 Vitest 會誤把 Playwright 的 `*.spec.ts` 當成自己的測試檔載入而噴錯）。
+
+### 沒有跑正式的 Lighthouse 稽核；「效能調校」用手動檢查取代
+- 里程碑：M6
+- 問題：SPEC §13 M6 驗收條件寫「Lighthouse 行動版 Performance ≥ 85」，但這個開發環境沒有 Chrome DevTools 或 `lighthouse` CLI 可用，沒辦法產生正式的 Lighthouse 分數。
+- 暫定假設：改用「已知會影響 Lighthouse Performance 分數的具體項目」逐項檢查與修正，取代跑分：`next/image` 的 `sizes` prop 補齊（避免瀏覽器抓過大的圖片變體）、`next.config.ts` 依實際上傳限制收窄 `deviceSizes`、圖片上傳統一轉 webp 並壓在 1200px 內、`/api/v1/menu` 既有的 `revalidate=60` 快取維持不變。正式 Lighthouse 分數建議在有 Chrome 的環境（本機瀏覽器 DevTools、或 CI 裝 `lighthouse` CLI）另外驗證一次，尤其是部署到正式環境、有真實網路延遲之後再量測才有意義。
+- 影響範圍：`src/components/product/product-detail-view.tsx`、`src/app/[locale]/cart/page.tsx`、`next.config.ts`。

@@ -68,6 +68,7 @@ afterEach(async () => {
 
   await prisma.paymentEvent.deleteMany({ where: { payment: { orderId: { in: orderIds } } } });
   await prisma.orderEvent.deleteMany({ where: { orderId: { in: orderIds } } });
+  await prisma.auditLog.deleteMany({ where: { targetType: "Order", targetId: { in: orderIds } } });
   await prisma.payment.deleteMany({ where: { orderId: { in: orderIds } } });
   await prisma.orderItemOption.deleteMany({ where: { orderItem: { orderId: { in: orderIds } } } });
   await prisma.orderItem.deleteMany({ where: { orderId: { in: orderIds } } });

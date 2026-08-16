@@ -1,6 +1,7 @@
 import type { OrderStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { refundOrder } from "@/server/payment/refund";
+import { writeAuditLog } from "@/server/admin/audit-log";
 import { transition, type ActorType } from "./state-machine";
 
 export async function listOrdersAdmin(filters: { status?: OrderStatus; pickupNumber?: string }) {
@@ -49,7 +50,7 @@ export async function updateOrderStatusAdmin(input: {
     });
   }
 
-  return prisma.$transaction((tx) =>
+  const order = await prisma.$transaction((tx) =>
     transition({
       tx,
       orderId: input.orderId,
@@ -61,4 +62,15 @@ export async function updateOrderStatusAdmin(input: {
       extraData: buildExtraData(input.toStatus, input.note),
     }),
   );
+  // OrderEvent（見 state-machine.ts）已記錄狀態機層級的細節（from/to/actorType），
+  // 這裡另外寫 AuditLog 是為了讓「所有寫入操作」（見 SPEC.md §12.1）能在同一張表
+  // 跨實體類型查詢，不用另外去查 OrderEvent。
+  await writeAuditLog({
+    actorId: input.actorId,
+    action: "order.statusChange",
+    targetType: "Order",
+    targetId: input.orderId,
+    diff: { toStatus: input.toStatus, note: input.note },
+  });
+  return order;
 }
