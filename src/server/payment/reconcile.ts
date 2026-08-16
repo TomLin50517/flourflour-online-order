@@ -3,6 +3,7 @@ import { getPaymentProvider } from "@/lib/payment/registry";
 import type { ProviderCode } from "@/lib/payment/types";
 import { assignPickupNumber } from "@/server/order/pickup-number";
 import { transition } from "@/server/order/state-machine";
+import { applyDailyProductSales } from "@/server/stats/daily-product-sales";
 
 const RECONCILE_AFTER_MINUTES = 3;
 
@@ -59,6 +60,10 @@ export async function reconcilePendingPayments(now: Date = new Date()) {
         note: "由對帳補償 job 主動查詢後確認付款成功",
         extraData: { paidAt, pickupNumber, businessDate, pickupSeq },
       });
+
+      // 見 SPEC.md §11：於 → PAID 的同一交易內累加 DailyProductSales。
+      const items = await tx.orderItem.findMany({ where: { orderId: order.id } });
+      await applyDailyProductSales(tx, "PAID", { storeId: store.id, businessDate, items });
     });
     reconciled += 1;
   }

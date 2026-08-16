@@ -5,6 +5,7 @@ import { getPaymentProvider } from "@/lib/payment/registry";
 import type { ProviderCode, RawWebhook, WebhookEvent } from "@/lib/payment/types";
 import { assignPickupNumber } from "@/server/order/pickup-number";
 import { transition } from "@/server/order/state-machine";
+import { applyDailyProductSales } from "@/server/stats/daily-product-sales";
 
 export class WebhookSignatureError extends Error {
   constructor(message = "驗簽失敗") {
@@ -154,6 +155,10 @@ export async function handlePaymentWebhook(
         actorType: "PAYMENT_WEBHOOK",
         extraData: { paidAt, pickupNumber, businessDate, pickupSeq },
       });
+
+      // 見 SPEC.md §11：於 → PAID 的同一交易內累加 DailyProductSales。
+      const items = await tx.orderItem.findMany({ where: { orderId: order.id } });
+      await applyDailyProductSales(tx, "PAID", { storeId: store.id, businessDate, items });
     }
     // 訂單已非 PENDING_PAYMENT（例如同一筆交易的重送事件帶了不同 providerEventId）：
     // Payment 已同步更新，視為冪等成功，不重複轉移訂單狀態。

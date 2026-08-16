@@ -3,6 +3,7 @@ import { AppError } from "@/lib/errors";
 import { getPaymentProvider } from "@/lib/payment/registry";
 import type { ProviderCode } from "@/lib/payment/types";
 import { transition } from "@/server/order/state-machine";
+import { applyDailyProductSales } from "@/server/stats/daily-product-sales";
 
 export class NoSuccessfulPaymentError extends AppError {
   constructor() {
@@ -29,6 +30,11 @@ export async function refundOrder(input: {
   if (!order) {
     throw new AppError("NOT_FOUND", "訂單不存在");
   }
+  if (!order.businessDate) {
+    // 理論上不會發生：能走到退款代表訂單已 PAID 過，businessDate 必與 pickupNumber 同時配發（INV-6）。
+    throw new AppError("INTERNAL_ERROR", "訂單缺少 businessDate，無法更新銷售統計");
+  }
+  const businessDate = order.businessDate;
 
   const payment = await prisma.payment.findFirst({
     where: { orderId: order.id, status: "SUCCEEDED" },
@@ -54,7 +60,7 @@ export async function refundOrder(input: {
       data: { status: "REFUNDED", refundedAt: new Date() },
     });
 
-    return transition({
+    const refunded = await transition({
       tx,
       orderId: order.id,
       expectedVersion: input.expectedVersion,
@@ -63,5 +69,12 @@ export async function refundOrder(input: {
       actorId: input.actorId,
       note: input.reason,
     });
+
+    // 見 SPEC.md §11：refundedQty/refundedAmount 歸屬於「原始 paidAt 的營業日」，
+    // 不是退款當日，所以用 order.businessDate（PAID 當下配發、退款不會改變）。
+    const items = await tx.orderItem.findMany({ where: { orderId: order.id } });
+    await applyDailyProductSales(tx, "REFUNDED", { storeId: order.storeId, businessDate, items });
+
+    return refunded;
   });
 }

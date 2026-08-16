@@ -85,3 +85,21 @@
 - 問題：SPEC §7.4 只說三顆按鈕「模擬付款成功 / 失敗 / 逾時」，沒有定義「逾時」在機制上該做什麼。付款失敗（`charge.failed`）與逾時（顧客根本沒完成付款）在真實金流語意上是不同的事件——逾時的本質是「什麼都沒發生，只是時間到了」，不會有廠商 webhook。
 - 暫定假設：「模擬逾時」按鈕不呼叫任何 API，只顯示提示文字，讓測試者理解「這筆訂單會在 `expiresAt` 之後被逾時 job（`expireOverdueOrders`）自動轉為 `CANCELLED`」，藉此也順便驗證逾時 job 而非重造一個假 webhook 事件。「模擬付款失敗」才會送出 `charge.failed` webhook。
 - 影響範圍：`src/app/dev/mock-pay/MockPayButtons.tsx`、`src/app/api/v1/dev/mock-pay/route.ts`。
+
+### REFUNDED 訂單是否計入 `quantitySold`？SPEC §11 條列容易誤讀
+- 里程碑：M5
+- 問題：SPEC §11「計入 quantitySold：訂單狀態 ∈ {PAID, PREPARING, READY, COMPLETED} 的所有 OrderItem.quantity」，字面上 `REFUNDED` 不在這個集合裡。但如果照字面解讀成「用訂單目前狀態去判斷是否計入 quantitySold」，一筆訂單被退款後 quantitySold 就會變成 0，而 refundedQty 卻仍然是原本的數量——`netQuantity = quantitySold − refundedQty` 會變成負數，跟 §11 自己說「netQuantity 為報表預設顯示欄」的用途矛盾（報表不該預設顯示一堆負數）。
+- 暫定假設：採「事件疊加」語意而非「目前狀態」語意——quantitySold 只在 → PAID 那一刻累加一次，之後不管訂單後來變成什麼狀態都不會再減少；REFUNDED 只會【額外】疊加 refundedQty，讓 netQuantity 自然扣回去。也就是說「PAID 之後又被退款」的訂單，quantitySold 依然計入（因為它確實被賣出過），只是 netQuantity 會被退款數量扣減。這個語意同時實作在即時累加（`server/stats/daily-product-sales.ts` 的 `applyDailyProductSales`，由 webhook/reconcile 的 PAID 分支與 refund.ts 的 REFUNDED 分支個別呼叫一次）與批次重算（`server/stats/rebuild.ts`：篩選 `paidAt IS NOT NULL` 的訂單一律計入 quantitySold，目前狀態為 REFUNDED 者才【額外】計入 refundedQty）兩條路徑，兩者刻意保持完全一致（見 `tests/stats-rebuild.test.ts` 驗證兩者結果相同）。
+- 影響範圍：`src/server/stats/daily-product-sales.ts`、`src/server/stats/rebuild.ts`、`src/server/payment/webhook.ts`、`src/server/payment/reconcile.ts`、`src/server/payment/refund.ts`。
+
+### `GET /admin/stats/summary` 的預設區間與回傳欄位超出 SPEC §8.3 字面描述
+- 里程碑：M5
+- 問題：SPEC §8.3 只說這支端點回傳「當日營收、單量、平均客單價、熱銷 Top 10」，沒提供 `from`/`to` 查詢參數，也沒提到 §10.5 頁面另外需要的「退款金額」KPI 卡與「趨勢圖」用的逐日資料。
+- 暫定假設：把 `from`/`to` 設計成可選查詢參數——都不帶時預設為「當日（今日營業日）」，符合 §8.3 字面「當日」的說法；帶了就依區間彙總，供 `/admin/stats` 頁面的日期篩選（今日/昨日/近7日/本月）共用同一支端點。回應內容額外加上 `refundAmount`（§10.5 KPI 卡需要）與 `dailyTrend`（區間內逐日訂單數/營收，§10.5 趨勢圖需要），避免前端為了兩張圖表/四張 KPI 卡而發三支不同的請求。這些都是回應內容的擴充而非既有欄位語意變更，不牴觸「介面凍結」原則。
+- 影響範圍：`src/server/stats/report.ts`（`getStatsSummary`）、`src/app/api/v1/admin/stats/summary/route.ts`、`src/schemas/admin.ts`（`statsSummaryQuerySchema`）。
+
+### 銷售量表「佔比」欄位以淨數量為基準；CSV／圖表不使用外部套件
+- 里程碑：M5
+- 問題：SPEC §10.5 只寫「佔比」，沒說是佔銷售數量、淨數量還是金額的比例；也沒規定 CSV 匯出與雙軸折線圖／Top 10 長條圖要不要用套件實作。
+- 暫定假設：「佔比」＝該商品淨數量佔區間內【全部商品淨數量總和】的比例，與表格預設排序欄位（淨數量）一致，前端不需要額外算兩套百分比。CSV（`src/lib/csv.ts`）與兩張圖表（`src/app/admin/(dashboard)/stats/{TrendChart,TopProductsChart}.tsx`）都刻意不引入新套件（`papaparse`、`recharts` 之類）——專案目前完全沒有圖表/CSV 相關依賴（見 `package.json`），只為兩張簡單圖表和一個字串產生器新增依賴不划算，手刻的 inline SVG／CSV 字串已足夠涵蓋 SPEC 需求。
+- 影響範圍：`src/server/stats/report.ts`、`src/lib/csv.ts`、`src/app/admin/(dashboard)/stats/*`。

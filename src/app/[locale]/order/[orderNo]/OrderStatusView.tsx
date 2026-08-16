@@ -45,21 +45,23 @@ export function OrderStatusView({
   const locale = useLocale();
 
   // 見 SPEC.md §9.6：accessToken 存於 sessionStorage，亦支援 ?t= 帶入（分享／重開）。
-  // 用 lazy initializer 而非 effect 讀取，避免掛載後才 setState 造成多餘的重渲染。
-  const [token] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    return tokenFromQuery ?? sessionStorage.getItem(`order.${orderNo}.token`);
-  });
+  // sessionStorage 只存在瀏覽器，SSR 階段一律不知道 token，故 useState 初始值
+  // 必須確定性地是 null（伺服器與客戶端首次渲染才會一致，避免 hydration
+  // mismatch），實際值改成掛載後在 useEffect 內才讀取／寫入。
+  const [token, setToken] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const notifiedReady = useRef(false);
 
   useEffect(() => {
-    if (token) {
-      sessionStorage.setItem(`order.${orderNo}.token`, token);
+    const resolved = tokenFromQuery ?? sessionStorage.getItem(`order.${orderNo}.token`);
+    if (resolved) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 見上方註解，此為掛載後才能取得的瀏覽器端資料，非可於 render 階段算出的衍生狀態
+      setToken(resolved);
+      sessionStorage.setItem(`order.${orderNo}.token`, resolved);
     }
-  }, [orderNo, token]);
+  }, [orderNo, tokenFromQuery]);
 
   useEffect(() => {
     if (!token) return;

@@ -109,6 +109,21 @@ export const refundOrderSchema = z.object({
   reason: z.string().min(1).max(500),
 });
 
+// 見 SPEC.md §8.3 stats 端點
+const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "格式需為 YYYY-MM-DD");
+
+export const dailyProductSalesQuerySchema = z.object({
+  from: isoDateSchema,
+  to: isoDateSchema,
+  productId: z.string().min(1).optional(),
+  format: z.enum(["json", "csv"]).default("json"),
+});
+
+export const statsSummaryQuerySchema = z.object({
+  from: isoDateSchema.optional(),
+  to: isoDateSchema.optional(),
+});
+
 export const uploadPresignSchema = z.object({
   filename: z.string().min(1),
   contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),

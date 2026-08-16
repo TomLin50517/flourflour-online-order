@@ -15,6 +15,7 @@ export default async function AdminDashboardLayout({
           <Link href="/admin/orders">訂單看板</Link>
           <Link href="/admin/products">商品管理</Link>
           <Link href="/admin/option-groups">規格管理</Link>
+          <Link href="/admin/stats">銷售統計</Link>
         </nav>
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <span>{session?.user?.email}</span>
