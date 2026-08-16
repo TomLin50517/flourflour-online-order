@@ -13,10 +13,12 @@
     "submit": "注文を確定する",
     "submitting": "送信中…",
     "orderCreated": "注文が作成されました",
-    "paymentPending": "決済連携は準備中です",
+    "redirectingToPayment": "決済ページに移動しています…",
+    "paymentFailed": "決済の開始に失敗しました。もう一度お試しください",
     "backToMenu": "メニューに戻る"
   },
   "order": {
+    "title": "注文状況",
     "pickupNumber": "受け取り番号",
     "waitingPayment": "決済完了後に受け取り番号が表示されます",
     "status": {
@@ -27,7 +29,16 @@
       "COMPLETED": "受け取り完了",
       "CANCELLED": "キャンセル済み",
       "REFUNDED": "返金済み"
-    }
+    },
+    "expiresIn": "支払い残り時間",
+    "expired": "この注文は期限切れです",
+    "retryPayment": "もう一度支払う",
+    "bookmarkHint": "このページをブックマークまたはスクリーンショットして、後で注文状況を確認できます",
+    "itemsTitle": "注文明細",
+    "total": "合計",
+    "readyNotice": "この画面をカウンターでご提示ください",
+    "loadError": "注文が見つからないか、アクセストークンが正しくありません",
+    "backToMenu": "メニューに戻る"
   },
   "error": { "generic": "只今混み合っております。しばらくしてから再度お試しください", "outOfStock": "一部の商品は売り切れです" }
 }

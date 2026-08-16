@@ -1,6 +1,6 @@
 import type { OrderStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { NotImplementedError } from "@/lib/errors";
+import { refundOrder } from "@/server/payment/refund";
 import { transition, type ActorType } from "./state-machine";
 
 export async function listOrdersAdmin(filters: { status?: OrderStatus; pickupNumber?: string }) {
@@ -39,8 +39,14 @@ export async function updateOrderStatusAdmin(input: {
   note?: string;
 }) {
   if (input.toStatus === "REFUNDED") {
-    // 見 SPEC.md §6.2：REFUNDED 需先呼叫 provider.refund()，PaymentProvider 介面待 M4
-    throw new NotImplementedError("Refund.execute — 待 M4 PaymentProvider 介面完成");
+    // 見 SPEC.md §6.2：REFUNDED 需先呼叫 provider.refund() 成功後才轉移狀態，
+    // 委派給 server/payment/refund.ts（與 POST /admin/orders/{id}/refund 共用同一套邏輯）。
+    return refundOrder({
+      orderId: input.orderId,
+      expectedVersion: input.expectedVersion,
+      reason: input.note ?? "管理者退款",
+      actorId: input.actorId,
+    });
   }
 
   return prisma.$transaction((tx) =>

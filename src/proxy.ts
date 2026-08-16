@@ -19,6 +19,11 @@ export default auth((request) => {
     return NextResponse.next();
   }
 
+  // 見 SPEC.md §7.4：/dev/mock-pay 是開發用頁面，不走語系協商（本身以 NODE_ENV 自我限制註冊）。
+  if (pathname.startsWith("/dev")) {
+    return NextResponse.next();
+  }
+
   return handleIntl(request);
 });
 

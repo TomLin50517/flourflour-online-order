@@ -104,6 +104,11 @@ export const updateOrderStatusSchema = z.object({
   note: z.string().max(500).optional(),
 });
 
+// 見 SPEC.md §8.3 POST /admin/orders/{id}/refund
+export const refundOrderSchema = z.object({
+  reason: z.string().min(1).max(500),
+});
+
 export const uploadPresignSchema = z.object({
   filename: z.string().min(1),
   contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),

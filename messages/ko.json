@@ -13,10 +13,12 @@
     "submit": "주문하기",
     "submitting": "제출 중…",
     "orderCreated": "주문이 생성되었습니다",
-    "paymentPending": "결제 연동은 준비 중입니다",
+    "redirectingToPayment": "결제 페이지로 이동 중…",
+    "paymentFailed": "결제 시작에 실패했습니다. 다시 시도해 주세요",
     "backToMenu": "메뉴로 돌아가기"
   },
   "order": {
+    "title": "주문 상태",
     "pickupNumber": "픽업 번호",
     "waitingPayment": "결제가 완료되면 픽업 번호가 표시됩니다",
     "status": {
@@ -27,7 +29,16 @@
       "COMPLETED": "픽업 완료",
       "CANCELLED": "취소됨",
       "REFUNDED": "환불됨"
-    }
+    },
+    "expiresIn": "결제 남은 시간",
+    "expired": "주문이 만료되었습니다",
+    "retryPayment": "다시 결제하기",
+    "bookmarkHint": "이 페이지를 북마크하거나 스크린샷으로 저장해 두세요",
+    "itemsTitle": "주문 내역",
+    "total": "총액",
+    "readyNotice": "카운터에서 이 화면을 보여주세요",
+    "loadError": "주문을 찾을 수 없거나 접근 토큰이 올바르지 않습니다",
+    "backToMenu": "메뉴로 돌아가기"
   },
   "error": { "generic": "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요", "outOfStock": "일부 상품이 품절되었습니다" }
 }

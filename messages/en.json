@@ -13,10 +13,12 @@
     "submit": "Place Order",
     "submitting": "Submitting…",
     "orderCreated": "Order created",
-    "paymentPending": "Payment integration is coming soon",
+    "redirectingToPayment": "Redirecting to payment…",
+    "paymentFailed": "Failed to start payment, please try again",
     "backToMenu": "Back to menu"
   },
   "order": {
+    "title": "Order Status",
     "pickupNumber": "Pickup Number",
     "waitingPayment": "Your pickup number will appear once payment is complete",
     "status": {
@@ -27,7 +29,16 @@
       "COMPLETED": "Completed",
       "CANCELLED": "Cancelled",
       "REFUNDED": "Refunded"
-    }
+    },
+    "expiresIn": "Time left to pay",
+    "expired": "This order has expired",
+    "retryPayment": "Retry Payment",
+    "bookmarkHint": "Bookmark or screenshot this page to check your order status later",
+    "itemsTitle": "Order Details",
+    "total": "Total",
+    "readyNotice": "Show this screen at the counter to pick up your order",
+    "loadError": "Order not found, or the access token is invalid",
+    "backToMenu": "Back to menu"
   },
   "error": { "generic": "We're experiencing an issue, please try again shortly", "outOfStock": "Some items are sold out" }
 }

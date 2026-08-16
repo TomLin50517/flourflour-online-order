@@ -1,28 +1,102 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { useRouter } from "next/navigation";
 import { useCart } from "@/lib/cart/cart-context";
 
 type OrderResult = {
   orderNo: string;
+  accessToken: string;
   totalAmount: number;
   currency: string;
   items: { name: string; quantity: number; unitPrice: number; lineTotal: number }[];
 };
 
+type CreateChargeResult =
+  | { mode: "REDIRECT"; paymentId: string; providerRef?: string; redirectUrl: string }
+  | { mode: "FORM_POST"; paymentId: string; providerRef?: string; action: string; fields: Record<string, string> }
+  | {
+      mode: "SDK_TOKEN";
+      paymentId: string;
+      providerRef?: string;
+      clientToken: string;
+      sdkParams: Record<string, unknown>;
+    };
+
+function submitFormPost(action: string, fields: Record<string, string>) {
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = action;
+  for (const [key, value] of Object.entries(fields)) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = key;
+    input.value = value;
+    form.appendChild(input);
+  }
+  document.body.appendChild(form);
+  form.submit();
+}
+
 export default function CheckoutPage() {
   const t = useTranslations("checkout");
   const tCart = useTranslations("cart");
   const locale = useLocale();
+  const router = useRouter();
   const { lines, clear } = useCart();
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [payingState, setPayingState] = useState<"idle" | "paying" | "failed">("idle");
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<OrderResult | null>(null);
+  const [order, setOrder] = useState<OrderResult | null>(null);
+
+  const startPayment = useCallback(
+    async (orderNo: string, accessToken: string) => {
+      setPayingState("paying");
+      setError(null);
+      try {
+        const res = await fetch(`/api/v1/orders/${orderNo}/payment`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Order-Token": accessToken,
+          },
+          body: JSON.stringify({ returnPath: `/${locale}/order/${orderNo}` }),
+        });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          setError(body?.error?.message ?? t("paymentFailed"));
+          setPayingState("failed");
+          return;
+        }
+
+        const result: CreateChargeResult = await res.json();
+        // 見 SPEC.md §9.6：accessToken 存於 sessionStorage，訂單頁靠它查單。
+        sessionStorage.setItem(`order.${orderNo}.token`, accessToken);
+
+        if (result.mode === "REDIRECT") {
+          window.location.assign(result.redirectUrl);
+          return;
+        }
+        if (result.mode === "FORM_POST") {
+          submitFormPost(result.action, result.fields);
+          return;
+        }
+        // SDK_TOKEN（如 TapPay Fields）：待廠商 SDK 串接，見 SPEC.md §9.5 TODO(VENDOR-API)。
+        // 先導向訂單頁，顧客可在該頁看到「等待付款」並手動重試。
+        router.push(`/${locale}/order/${orderNo}`);
+      } catch {
+        setError(t("paymentFailed"));
+        setPayingState("failed");
+      }
+    },
+    [locale, router, t],
+  );
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -50,18 +124,33 @@ export default function CheckoutPage() {
       return;
     }
 
-    const order: OrderResult = await res.json();
-    setResult(order);
+    const created: OrderResult = await res.json();
+    setOrder(created);
     clear();
     setSubmitting(false);
+    await startPayment(created.orderNo, created.accessToken);
   }
 
-  if (result) {
+  if (order) {
     return (
       <main className="mx-auto max-w-md px-4 py-10 text-center">
         <h1 className="text-xl font-semibold">{t("orderCreated")}</h1>
-        <p className="mt-2 text-2xl font-bold">{result.orderNo}</p>
-        <p className="mt-4 text-sm text-muted-foreground">{t("paymentPending")}</p>
+        <p className="mt-2 text-2xl font-bold">{order.orderNo}</p>
+        {payingState === "paying" && (
+          <p className="mt-4 text-sm text-muted-foreground">{t("redirectingToPayment")}</p>
+        )}
+        {payingState === "failed" && (
+          <div className="mt-4 space-y-3">
+            <p className="text-sm text-destructive">{error ?? t("paymentFailed")}</p>
+            <button
+              type="button"
+              onClick={() => startPayment(order.orderNo, order.accessToken)}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+            >
+              {t("payNow")}
+            </button>
+          </div>
+        )}
         <a href={`/${locale}`} className="mt-6 inline-block underline">
           {t("backToMenu")}
         </a>

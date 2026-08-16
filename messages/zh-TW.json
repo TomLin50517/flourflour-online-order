@@ -13,10 +13,12 @@
     "submit": "送出訂單",
     "submitting": "送出中…",
     "orderCreated": "訂單已建立",
-    "paymentPending": "金流串接尚未完成，付款功能即將推出",
+    "redirectingToPayment": "正在導向付款頁…",
+    "paymentFailed": "建立付款失敗，請重試",
     "backToMenu": "返回菜單"
   },
   "order": {
+    "title": "訂單狀態",
     "pickupNumber": "取餐號碼",
     "waitingPayment": "付款完成後將顯示取餐號碼",
     "status": {
@@ -27,7 +29,16 @@
       "COMPLETED": "已完成",
       "CANCELLED": "已取消",
       "REFUNDED": "已退款"
-    }
+    },
+    "expiresIn": "剩餘付款時間",
+    "expired": "訂單已逾期",
+    "retryPayment": "重新付款",
+    "bookmarkHint": "請將此頁加入書籤或截圖保存，以便隨時查看訂單狀態",
+    "itemsTitle": "訂單明細",
+    "total": "總計",
+    "readyNotice": "請至櫃檯出示此畫面取餐",
+    "loadError": "找不到訂單，或存取權杖不正確",
+    "backToMenu": "返回菜單"
   },
   "error": { "generic": "系統忙碌，請稍後再試", "outOfStock": "部分商品已售完" }
 }
