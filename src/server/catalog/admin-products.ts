@@ -1,8 +1,9 @@
 import { revalidateTag } from "next/cache";
 import { LOCALES } from "@/lib/i18n/locale-map";
 import { toDbLocale, type Locale } from "@/lib/i18n/locale-map";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { NotFoundError, ValidationError } from "@/lib/errors";
+import type { PrismaClient } from "@/generated/prisma/client";
 import { writeAuditLog } from "@/server/admin/audit-log";
 
 type TranslationInput = { locale: Locale; name: string; description?: string };
@@ -37,6 +38,7 @@ export async function listProductsAdmin(filters: {
   categoryId?: string;
   isActive?: boolean;
 }) {
+  const prisma = await getDb();
   const store = await prisma.store.findFirstOrThrow();
   const page = filters.page ?? 1;
   const pageSize = filters.pageSize ?? 20;
@@ -70,6 +72,7 @@ export async function listProductsAdmin(filters: {
 }
 
 export async function getProductAdmin(id: string) {
+  const prisma = await getDb();
   const product = await prisma.product.findUnique({
     where: { id },
     include: {
@@ -111,8 +114,9 @@ export async function createProduct(
   actorId: string,
 ) {
   assertFourTranslations(input.translations);
+  const prisma = await getDb();
   const store = await prisma.store.findFirstOrThrow();
-  const optionGroupBindings = await buildOptionGroupBindings(input.optionGroupIds);
+  const optionGroupBindings = await buildOptionGroupBindings(prisma, input.optionGroupIds);
 
   const product = await prisma.product.create({
     data: {
@@ -138,7 +142,7 @@ export async function createProduct(
  * minSelect > 0（例如必選的 boxSize）才視為必填，minSelect = 0（例如選填的 addon）則否。
  * 後台目前沒有讓管理者在綁定當下覆寫這個值的 UI，先以此為合理預設。
  */
-async function buildOptionGroupBindings(optionGroupIds: string[]) {
+async function buildOptionGroupBindings(prisma: PrismaClient, optionGroupIds: string[]) {
   if (optionGroupIds.length === 0) return [];
   const groups = await prisma.optionGroup.findMany({
     where: { id: { in: optionGroupIds } },
@@ -167,6 +171,7 @@ export async function updateProduct(
   },
   actorId: string,
 ) {
+  const prisma = await getDb();
   const existing = await prisma.product.findUnique({
     where: { id },
     include: { translations: true, images: true },
@@ -182,7 +187,7 @@ export async function updateProduct(
   }
 
   const optionGroupBindings = input.optionGroupIds
-    ? await buildOptionGroupBindings(input.optionGroupIds)
+    ? await buildOptionGroupBindings(prisma, input.optionGroupIds)
     : undefined;
 
   const result = await prisma.$transaction(async (tx) => {
@@ -235,6 +240,7 @@ export async function updateProductAvailability(
   input: { isActive?: boolean; isSoldOut?: boolean },
   actorId: string,
 ) {
+  const prisma = await getDb();
   const existing = await prisma.product.findUnique({
     where: { id },
     include: { translations: true, images: true },
@@ -261,6 +267,7 @@ export async function updateProductAvailability(
 }
 
 export async function deleteProduct(id: string, actorId: string) {
+  const prisma = await getDb();
   const existing = await prisma.product.findUnique({ where: { id } });
   if (!existing) throw new NotFoundError("商品不存在");
   // 見 SPEC.md INV-7：一律軟刪除
@@ -273,6 +280,7 @@ export async function deleteProduct(id: string, actorId: string) {
 }
 
 export async function listMissingTranslations() {
+  const prisma = await getDb();
   const store = await prisma.store.findFirstOrThrow();
   const products = await prisma.product.findMany({
     where: { storeId: store.id, deletedAt: null },

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { fromDbLocale } from "@/lib/i18n/locale-map";
 import { maskSensitive } from "@/lib/payment/mask";
@@ -35,6 +35,7 @@ export async function createOrderPayment(input: {
   returnPath: string;
   clientMeta?: { ip?: string; userAgent?: string };
 }): Promise<CreateChargeResult> {
+  const prisma = await getDb();
   const order = await prisma.order.findUnique({
     where: { orderNo: input.orderNo },
     include: { items: true },

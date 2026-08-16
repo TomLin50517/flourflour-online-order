@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { AppError, toErrorResponse } from "@/lib/errors";
 import { signMockPayload, type MockWebhookPayload } from "@/lib/payment/providers/mock";
 
@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
   try {
     const { orderNo, paymentId, outcome } = bodySchema.parse(await request.json());
 
+    const prisma = await getDb();
     const order = await prisma.order.findUnique({ where: { orderNo } });
     if (!order) {
       throw new AppError("NOT_FOUND", "訂單不存在");

@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { getPaymentProvider } from "@/lib/payment/registry";
 import type { ProviderCode } from "@/lib/payment/types";
@@ -27,6 +27,7 @@ export async function refundOrder(input: {
   reason: string;
   actorId: string;
 }) {
+  const prisma = await getDb();
   const order = await prisma.order.findUnique({ where: { id: input.orderId } });
   if (!order) {
     throw new AppError("NOT_FOUND", "訂單不存在");

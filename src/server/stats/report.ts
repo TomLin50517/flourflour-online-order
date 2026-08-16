@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { toBusinessDate } from "@/server/order/business-date";
 
 export type DailyProductSalesRow = {
@@ -24,6 +24,7 @@ export async function getDailyProductSalesReport(params: {
   to: Date;
   productId?: string;
 }): Promise<{ from: Date; to: Date; items: DailyProductSalesRow[] }> {
+  const prisma = await getDb();
   const store = await prisma.store.findFirstOrThrow();
 
   const rows = await prisma.dailyProductSales.findMany({
@@ -98,6 +99,7 @@ function resolveRange(
  * （§10.5 頁面需求，與 summary 端點合併回傳，避免前端多一次請求）。
  */
 export async function getStatsSummary(params: { from?: Date; to?: Date }): Promise<StatsSummary> {
+  const prisma = await getDb();
   const store = await prisma.store.findFirstOrThrow();
   const { from, to } = resolveRange(params, store);
 

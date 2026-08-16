@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 
 const TEST_NOTE = "PLAYWRIGHT_E2E_TEST";
 
@@ -9,6 +9,7 @@ const TEST_NOTE = "PLAYWRIGHT_E2E_TEST";
  * 建議在 `npm run test:e2e` 之後執行。
  */
 async function main() {
+  const prisma = await getDb();
   const orders = await prisma.order.findMany({ where: { customerNote: TEST_NOTE } });
   const orderIds = orders.map((o) => o.id);
   if (orderIds.length === 0) {

@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { prisma } from "../src/lib/db";
+import { getDb } from "../src/lib/db";
 import { assignPickupNumber } from "../src/server/order/pickup-number";
 import { transition } from "../src/server/order/state-machine";
 
@@ -10,6 +10,7 @@ if (!orderNo) {
 }
 
 async function main() {
+  const prisma = await getDb();
   const store = await prisma.store.findFirstOrThrow();
   const order = await prisma.order.findUniqueOrThrow({ where: { orderNo } });
 

@@ -1,10 +1,11 @@
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { NotFoundError } from "@/lib/errors";
 import { toDbLocale, type Locale } from "@/lib/i18n/locale-map";
 import { pickTranslation } from "@/lib/i18n/localize";
 import type { Menu } from "./types";
 
 export async function getMenu(locale: Locale): Promise<Menu> {
+  const prisma = await getDb();
   const dbLocale = toDbLocale(locale);
 
   const store = await prisma.store.findFirst();

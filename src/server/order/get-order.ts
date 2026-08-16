@@ -1,5 +1,5 @@
 import { AppError, NotFoundError } from "@/lib/errors";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 
 export class UnauthorizedOrderAccessError extends AppError {
   constructor() {
@@ -9,6 +9,7 @@ export class UnauthorizedOrderAccessError extends AppError {
 }
 
 export async function getOrderByNo(orderNo: string, accessToken: string) {
+  const prisma = await getDb();
   const order = await prisma.order.findUnique({
     where: { orderNo },
     include: {

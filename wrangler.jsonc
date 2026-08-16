@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "flourflour-online-order",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-08-16",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  // 見 docs/OPEN-QUESTIONS.md：id 是佔位值，需要先用
+  // `npx wrangler hyperdrive create <NAME> --connection-string="<Supabase Direct connection URI>"`
+  // 建立真正的 Hyperdrive 資源後，把這裡的 id 換成指令輸出的真實 id。
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "REPLACE_WITH_REAL_HYPERDRIVE_ID"
+    }
+  ]
+}

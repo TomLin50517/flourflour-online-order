@@ -1,5 +1,5 @@
 import type { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 
 /**
  * 見 SPEC.md §12.1：「所有寫入操作記 AuditLog」。刻意做成 fire-and-forget
@@ -16,6 +16,7 @@ export async function writeAuditLog(params: {
   targetId: string;
   diff?: unknown;
 }): Promise<void> {
+  const prisma = await getDb();
   await prisma.auditLog.create({
     data: {
       actorId: params.actorId,

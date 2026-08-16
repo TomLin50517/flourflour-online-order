@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { NotFoundError } from "@/lib/errors";
 import { toDbLocale, type Locale } from "@/lib/i18n/locale-map";
 import { pickTranslation } from "@/lib/i18n/localize";
@@ -8,6 +8,7 @@ export async function getProduct(
   slug: string,
   locale: Locale,
 ): Promise<ProductDetail> {
+  const prisma = await getDb();
   const dbLocale = toDbLocale(locale);
 
   const product = await prisma.product.findFirst({

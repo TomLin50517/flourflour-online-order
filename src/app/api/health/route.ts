@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { logger } from "@/lib/logger";
 
 type MigrationRow = { migration_name: string; finished_at: Date | null };
@@ -11,6 +11,7 @@ export async function GET() {
   const startedAt = Date.now();
 
   try {
+    const prisma = await getDb();
     await prisma.$queryRaw`SELECT 1`;
     const latencyMs = Date.now() - startedAt;
 

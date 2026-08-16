@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { PaymentStatus } from "@/generated/prisma/enums";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import type {
   CreateChargeInput,
   CreateChargeResult,
@@ -76,6 +76,7 @@ export class MockProvider implements PaymentProvider {
 
   async queryCharge(providerRef: string): Promise<{ status: PaymentStatus; amount: number; paidAt?: Date }> {
     // Mock 無外部伺服器可查，改以自家 Payment 表模擬「向廠商查詢」的結果。
+    const prisma = await getDb();
     const payment = await prisma.payment.findFirst({ where: { provider: "mock", providerRef } });
     if (!payment) {
       return { status: PaymentStatus.PENDING, amount: 0 };

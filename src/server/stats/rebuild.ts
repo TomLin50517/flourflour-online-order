@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 
 export type RebuildResult = {
   from: Date;
@@ -37,6 +37,7 @@ export async function rebuildDailyProductSales(params: {
   to: Date;
   storeId?: string;
 }): Promise<RebuildResult> {
+  const prisma = await getDb();
   const store = params.storeId ? { id: params.storeId } : await prisma.store.findFirstOrThrow();
 
   const orders = await prisma.order.findMany({

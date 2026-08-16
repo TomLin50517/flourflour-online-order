@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
+
+const prisma = await getDb();
 import { reconcilePendingPayments } from "@/server/payment/reconcile";
 
 async function createStaleOrder(totalAmount: number) {

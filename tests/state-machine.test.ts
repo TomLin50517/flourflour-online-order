@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { OrderStatus } from "@/generated/prisma/enums";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
+
+const prisma = await getDb();
 import {
   ConflictError,
   InvalidStateTransitionError,

@@ -1,5 +1,5 @@
 import { revalidateTag } from "next/cache";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { NotFoundError } from "@/lib/errors";
 import { toDbLocale, type Locale } from "@/lib/i18n/locale-map";
 import { writeAuditLog } from "@/server/admin/audit-log";
@@ -14,6 +14,7 @@ function translationRows(translations: CategoryTranslationInput[]) {
 }
 
 export async function listCategoriesAdmin() {
+  const prisma = await getDb();
   const store = await prisma.store.findFirstOrThrow();
   return prisma.category.findMany({
     where: { storeId: store.id },
@@ -30,6 +31,7 @@ export async function createCategory(
   },
   actorId: string,
 ) {
+  const prisma = await getDb();
   const store = await prisma.store.findFirstOrThrow();
   const category = await prisma.category.create({
     data: {
@@ -55,6 +57,7 @@ export async function updateCategory(
   },
   actorId: string,
 ) {
+  const prisma = await getDb();
   const existing = await prisma.category.findUnique({ where: { id } });
   if (!existing) throw new NotFoundError("分類不存在");
 
@@ -81,6 +84,7 @@ export async function updateCategory(
 }
 
 export async function deleteCategory(id: string, actorId: string) {
+  const prisma = await getDb();
   const existing = await prisma.category.findUnique({ where: { id } });
   if (!existing) throw new NotFoundError("分類不存在");
   // 商品的 categoryId 為可選欄位，刪除分類前先解除關聯，避免外鍵限制擋下操作

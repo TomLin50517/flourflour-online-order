@@ -1,10 +1,11 @@
 import type { OrderStatus } from "@/generated/prisma/enums";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { refundOrder } from "@/server/payment/refund";
 import { writeAuditLog } from "@/server/admin/audit-log";
 import { transition, type ActorType } from "./state-machine";
 
 export async function listOrdersAdmin(filters: { status?: OrderStatus; pickupNumber?: string }) {
+  const prisma = await getDb();
   const store = await prisma.store.findFirstOrThrow();
   return prisma.order.findMany({
     where: {
@@ -50,6 +51,7 @@ export async function updateOrderStatusAdmin(input: {
     });
   }
 
+  const prisma = await getDb();
   const order = await prisma.$transaction((tx) =>
     transition({
       tx,

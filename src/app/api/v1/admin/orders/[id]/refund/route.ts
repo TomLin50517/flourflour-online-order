@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { AppError, toErrorResponse } from "@/lib/errors";
 import { idParamsSchema, refundOrderSchema } from "@/schemas/admin";
 import { requireAdmin } from "@/server/admin/guard";
@@ -16,6 +16,7 @@ export async function POST(
 
     // SPEC §8.3 此端點的 body 只有 { reason }，沒有 expectedVersion，
     // 故直接讀取當下版本號；樂觀鎖仍由 transition() 內的 updateMany 把關。
+    const prisma = await getDb();
     const order = await prisma.order.findUnique({ where: { id }, select: { version: true } });
     if (!order) {
       throw new AppError("NOT_FOUND", "訂單不存在");

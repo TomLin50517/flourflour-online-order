@@ -1,17 +1,33 @@
 import bcrypt from "bcryptjs";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { authConfig } from "./auth.config";
 import { getClientIp } from "@/lib/client-ip";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { clearLoginFailures, isLockedOut, recordLoginFailure } from "@/lib/login-guard";
 import { checkRateLimit } from "@/lib/rate-limit";
 
-// 見 src/auth.config.ts：這個檔案疊上完整的 Credentials provider（含 bcrypt／
-// Prisma），只給 API route handler／Server Component／Server Action 用。
-// middleware 改用 src/proxy.ts 自己另外建立的、只吃 authConfig 的輕量 instance。
+// 見 docs/OPEN-QUESTIONS.md：先前為了讓 middleware（src/proxy.ts）保持 edge-safe，
+// 曾把設定拆成 auth.config.ts + auth.ts 兩個檔案。後來證實 Next.js 16 的 proxy.ts
+// 架構性地強制 Node.js runtime，跟拆不拆分無關（已用對照實驗驗證），故改為徹底
+// 移除 proxy.ts、把登入檢查搬到 app/admin/(dashboard)/layout.tsx，這個檔案不再
+// 需要給 middleware 用的輕量版本，合併回單一檔案。
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  ...authConfig,
+  session: { strategy: "jwt" },
+  pages: { signIn: "/admin/login" },
+  callbacks: {
+    jwt({ token, user }) {
+      if (user) {
+        token.role = user.role;
+        token.id = user.id;
+      }
+      return token;
+    },
+    session({ session, token }) {
+      if (token.id) session.user.id = token.id;
+      if (token.role) session.user.role = token.role;
+      return session;
+    },
+  },
   providers: [
     Credentials({
       credentials: {
@@ -31,6 +47,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // 見 SPEC.md §10.1：失敗 5 次鎖定 15 分鐘（以 IP + email 計數）。
         if (isLockedOut(ip, email)) return null;
 
+        const prisma = await getDb();
         const user = await prisma.adminUser.findUnique({ where: { email } });
         if (!user || !user.isActive) {
           recordLoginFailure(ip, email);

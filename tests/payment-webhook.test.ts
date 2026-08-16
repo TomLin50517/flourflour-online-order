@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
+
+const prisma = await getDb();
 import { signMockPayload } from "@/lib/payment/providers/mock";
 import type { RawWebhook } from "@/lib/payment/types";
 import { handlePaymentWebhook, WebhookSignatureError } from "@/server/payment/webhook";

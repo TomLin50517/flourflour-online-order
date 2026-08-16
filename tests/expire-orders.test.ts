@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
+
+const prisma = await getDb();
 import { expireOverdueOrders } from "@/server/order/expire-orders";
 
 // 見 tests/payment-webhook.test.ts 的說明：Vitest 預設會平行跑多個測試檔，

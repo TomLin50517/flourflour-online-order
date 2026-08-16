@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { toDbLocale, type Locale } from "@/lib/i18n/locale-map";
 import { writeAuditLog } from "@/server/admin/audit-log";
@@ -28,6 +28,7 @@ function assertBounds(selectType: "SINGLE" | "MULTIPLE", minSelect: number, maxS
 }
 
 export async function listOptionGroupsAdmin() {
+  const prisma = await getDb();
   const store = await prisma.store.findFirstOrThrow();
   return prisma.optionGroup.findMany({
     where: { storeId: store.id },
@@ -51,6 +52,7 @@ export async function createOptionGroup(
   actorId: string,
 ) {
   assertBounds(input.selectType, input.minSelect, input.maxSelect);
+  const prisma = await getDb();
   const store = await prisma.store.findFirstOrThrow();
 
   const group = await prisma.optionGroup.create({
@@ -97,6 +99,7 @@ export async function updateOptionGroup(
   },
   actorId: string,
 ) {
+  const prisma = await getDb();
   const existing = await prisma.optionGroup.findUnique({ where: { id } });
   if (!existing) throw new NotFoundError("規格群組不存在");
 
@@ -151,6 +154,7 @@ export async function updateOptionGroup(
 }
 
 export async function deleteOptionGroup(id: string, actorId: string) {
+  const prisma = await getDb();
   const existing = await prisma.optionGroup.findUnique({ where: { id } });
   if (!existing) throw new NotFoundError("規格群組不存在");
   await prisma.$transaction([

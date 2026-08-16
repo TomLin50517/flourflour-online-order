@@ -4,7 +4,7 @@ import { AppError } from "@/lib/errors";
 import { toDbLocale } from "@/lib/i18n/locale-map";
 import { toTranslationRecord } from "@/lib/i18n/localize";
 import { calcLineTotal, calcSubtotal, calcUnitPrice, sumPriceDeltas } from "@/lib/money";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import type { CreateOrderInput } from "@/schemas/order";
 import { assignOrderNo } from "./order-no";
 
@@ -139,6 +139,7 @@ function prepareItem(
 }
 
 export async function createOrder(input: CreateOrderInput, idempotencyKey: string) {
+  const prisma = await getDb();
   const existing = await prisma.order.findUnique({
     where: { idempotencyKey },
     include: { items: { include: { options: true } } },

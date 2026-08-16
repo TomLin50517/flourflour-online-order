@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
+
+const prisma = await getDb();
 import { applyDailyProductSales } from "@/server/stats/daily-product-sales";
 
 // 用完全合成的 storeId/productId（DailyProductSales 對兩者皆無外鍵約束），

@@ -5,7 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/header";
 import { routing } from "@/i18n/routing";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import "../globals.css";
 
 export function generateStaticParams() {
@@ -32,6 +32,7 @@ export default async function LocaleLayout(props: LayoutProps<"/[locale]">) {
     notFound();
   }
 
+  const prisma = await getDb();
   const store = await prisma.store.findFirst();
 
   return (

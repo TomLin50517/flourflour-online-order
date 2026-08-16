@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
+
+const prisma = await getDb();
 import { assignPickupNumber, type PickupStoreConfig } from "@/server/order/pickup-number";
 
 function makeStore(overrides: Partial<PickupStoreConfig> = {}): PickupStoreConfig {

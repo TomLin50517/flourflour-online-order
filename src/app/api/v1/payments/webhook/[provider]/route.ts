@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { toErrorResponse } from "@/lib/errors";
@@ -51,7 +52,7 @@ export async function POST(
       // 見 SPEC.md §12.3：webhook 驗簽失敗是需要告警的事件之一。
       logger.alert("webhook signature verification failed", {
         message: error.message,
-        requestId: request.headers.get("x-request-id") ?? undefined,
+        requestId: request.headers.get("x-request-id") ?? randomUUID(),
       });
       return NextResponse.json(
         { error: { code: "VALIDATION_FAILED", message: error.message } },
@@ -65,7 +66,7 @@ export async function POST(
     // 失敗細節已於 handlePaymentWebhook 內部記錄，PaymentEvent.processedAt 會維持 null 供補償 job 重試。
     logger.error("payment webhook unexpected error", {
       error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      requestId: request.headers.get("x-request-id") ?? undefined,
+      requestId: request.headers.get("x-request-id") ?? randomUUID(),
     });
     return NextResponse.json({ received: true }, { status: 200 });
   }

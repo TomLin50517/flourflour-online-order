@@ -1,5 +1,5 @@
-import type { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/db";
+import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+import { getDb } from "@/lib/db";
 import { maskSensitive } from "@/lib/payment/mask";
 import { getPaymentProvider } from "@/lib/payment/registry";
 import type { ProviderCode, RawWebhook, WebhookEvent } from "@/lib/payment/types";
@@ -25,7 +25,7 @@ function isUniqueConstraintError(error: unknown): boolean {
   );
 }
 
-function markProcessed(eventId: string) {
+function markProcessed(prisma: PrismaClient, eventId: string) {
   return prisma.paymentEvent.update({ where: { id: eventId }, data: { processedAt: new Date() } });
 }
 
@@ -60,6 +60,7 @@ export async function handlePaymentWebhook(
   providerCode: ProviderCode,
   raw: RawWebhook,
 ): Promise<WebhookOutcome> {
+  const prisma = await getDb();
   const provider = getPaymentProvider(providerCode);
 
   if (!provider.verifySignature(raw)) {
@@ -101,14 +102,14 @@ export async function handlePaymentWebhook(
         failureMessage: event.failure?.message,
       },
     });
-    await markProcessed(eventRow.id);
+    await markProcessed(prisma, eventRow.id);
     return "IGNORED";
   }
 
   if (event.eventType !== "charge.succeeded") {
     // 例如 refund.succeeded／unknown：退款流程由 server/payment/refund.ts 主動觸發，
     // 這裡只記錄事件，不做額外狀態轉移。
-    await markProcessed(eventRow.id);
+    await markProcessed(prisma, eventRow.id);
     return "IGNORED";
   }
 
@@ -120,7 +121,7 @@ export async function handlePaymentWebhook(
         failureMessage: `webhook amount ${event.amount} != order.totalAmount ${order.totalAmount}`,
       },
     });
-    await markProcessed(eventRow.id);
+    await markProcessed(prisma, eventRow.id);
     return "AMOUNT_MISMATCH";
   }
 

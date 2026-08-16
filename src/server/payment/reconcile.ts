@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { getPaymentProvider } from "@/lib/payment/registry";
 import type { ProviderCode } from "@/lib/payment/types";
@@ -14,6 +14,7 @@ const RECONCILE_AFTER_MINUTES = 3;
  * 「更新 Payment → 配發 pickupNumber → transition 到 PAID」邏輯。
  */
 export async function reconcilePendingPayments(now: Date = new Date()) {
+  const prisma = await getDb();
   const threshold = new Date(now.getTime() - RECONCILE_AFTER_MINUTES * 60 * 1000);
   const candidates = await prisma.order.findMany({
     where: { status: "PENDING_PAYMENT", placedAt: { lt: threshold } },

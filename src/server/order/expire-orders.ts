@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { ConflictError, InvalidStateTransitionError, transition } from "./state-machine";
 
@@ -13,6 +13,7 @@ const ALERT_THRESHOLD = 0.2;
  * 觸發方式見 docs/OPEN-QUESTIONS.md（本專案無常駐排程器，改由外部 cron 呼叫 admin job 端點）。
  */
 export async function expireOverdueOrders(now: Date = new Date()) {
+  const prisma = await getDb();
   const overdue = await prisma.order.findMany({
     where: { status: "PENDING_PAYMENT", expiresAt: { lt: now } },
     select: { id: true, version: true },
