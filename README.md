@@ -61,14 +61,25 @@ npm run stats:rebuild -- --from=2026-08-01 --to=2026-08-31   # 由訂單明細�
 
 ## 部署備忘
 
-專案本身是一般的 Next.js Server（Node.js runtime），部署到 Vercel 或任何一般 Node.js 主機（Railway/Render/Fly.io 等）沒有已知障礙。目標架構是 **Cloudflare Workers（網頁）+ R2（圖檔）+ 外部 Postgres（資料庫，經 Hyperdrive 或 Neon 之類的 serverless Postgres）**，目前狀態：
+專案本身是一般的 Next.js Server（Node.js runtime），部署到 Vercel 或任何一般 Node.js 主機（Railway/Render/Fly.io 等）沒有已知障礙。目標架構是 **Cloudflare Workers（網頁）+ R2（圖檔）+ Supabase Postgres（資料庫，經 Hyperdrive）**，目前狀態：
 
-1. ~~`src/proxy.ts`（Next.js Middleware）被判定為需要 Node.js runtime~~ **已解決**：`src/auth.ts` 拆成 `src/auth.config.ts`（edge-safe，middleware 用）+ `src/auth.ts`（完整版，含 Credentials provider，給 API route／後台頁面用），middleware 改用只吃 `authConfig` 的輕量 `NextAuth` instance，不再連帶引用 Prisma。見 `docs/OPEN-QUESTIONS.md`。
+1. ~~`src/proxy.ts`（Next.js Middleware）被判定為需要 Node.js runtime~~ **已解決**：查證 Next.js 16 官方文件確認 `proxy.ts` 架構性地宣告為 Node.js runtime、無法改成 edge（跟檔案裡 import 什麼無關，`runtime` config 選項在 Proxy 檔案裡設定了會直接拋錯），是 Next.js 16 新 Proxy 架構與 `@opennextjs/cloudflare` adapter 之間的已知生態相容性落差（[cloudflare/workers-sdk#13937](https://github.com/cloudflare/workers-sdk/issues/13937)）。解法是**整個移除 `src/proxy.ts`**，把裡面做的四件事（後台登入檢查、安全標頭、requestId、根路徑語言協商）分散到不受這個限制的地方（layout／`next.config.ts`／`app/page.tsx`）。已用 `npm run cf:build` 驗證整個建置一路跑完，無任何 middleware 相關錯誤。細節見 `docs/OPEN-QUESTIONS.md`。
 2. ~~`bcrypt`（後台登入密碼比對）是原生 C++ binding，Workers runtime 不支援~~ **已解決**：換成純 JS 的 `bcryptjs`（同樣的 `$2b$` hash 格式、相容 API），已用瀏覽器實測既有帳號（密碼 hash 是舊版 `bcrypt` 產生的）仍能正常登入。見 `docs/OPEN-QUESTIONS.md`。
-3. Prisma 目前用 `@prisma/adapter-pg`（node-postgres，走原生 TCP 連線），Workers runtime 預設不能開 TCP 連線到資料庫，需改用 Cloudflare Hyperdrive，或換成提供 HTTP driver 的 Postgres 代管服務（如 Neon）。**尚未處理**，等資料庫平台確定後再接。
+3. Prisma 走 TCP 連線，Workers runtime 預設不能開 TCP 連線到資料庫：`src/lib/db.ts` 已改成依 runtime 切換——本機 Node.js 用 `process.env.DATABASE_URL` 走既有的 module-level 單例；偵測到 Cloudflare Workers（`navigator.userAgent === "Cloudflare-Workers"`）時動態載入 `@opennextjs/cloudflare`，透過 `env.HYPERDRIVE.connectionString` 走 Hyperdrive binding，每個請求各自建立 `PrismaClient`（`maxUses: 1`）。`wrangler.jsonc` 已加入 Hyperdrive binding 佔位（`id` 是假值）。**尚未完成**：實際建立 Hyperdrive 資源需要 Cloudflare 帳號權限，這步驟只能由專案擁有者自己做——`npx wrangler login` 後執行 `npx wrangler hyperdrive create <NAME> --connection-string="<Supabase Direct connection URI>"`（Supabase 官方建議 Hyperdrive 要接 **Direct connection**，不是 Session pooler——Hyperdrive 自己會做連線池化，且 Cloudflare 的網路本身有 IPv6，不受本機開發環境的 IPv6 限制影響），再把輸出的真實 id 填回 `wrangler.jsonc`。跑 `npm run cf:typegen` 可以把 `cloudflare-env.d.ts` 換成用 `wrangler types` 產生的正式版本。
 4. ~~圖檔上傳（`src/app/api/v1/admin/uploads/route.ts`）用 `sharp` 做 webp 轉檔，`sharp` 是原生 binding，Workers runtime 不支援~~ **已解決**：換成 `@cf-wasm/photon`（WASM，`/node`／`/workerd`／`/edge-light` 皆可用）。過程中發現並繞開了該套件 `rotate()` 的一個色彩正確性 bug（改用手動 raw-pixel 座標搬移做 90/180/270 度旋轉），且 `get_bytes_webp()` 只支援無損壓縮（無 `sharp` 原本的 quality 82 有損選項，輸出檔案會較大——SPEC 沒有規定要有損壓縮，故不算違反規格，但是已知的效能取捨）。已用實際 HTTP 上傳（`/api/v1/admin/uploads`）＋瀏覽器解碼驗證輸出是有效 webp。細節見 `docs/OPEN-QUESTIONS.md`。
 
-資料庫本身維持 Postgres 即可（`SPEC.md` ADR-2 的選型理由——訂單狀態機的樂觀鎖、取貨號原子遞增都需要 Postgres 等級的交易一致性），不建議為了配合 Workers 換成 SQLite/D1；改連線方式（Hyperdrive 或 Neon 之類的 serverless Postgres）即可，schema 不需要變動。圖檔儲存已經是 `@aws-sdk/client-s3` 走 S3 相容 API（原本接 MinIO），換成 R2 只需要調整 `STORAGE_*` 環境變數，程式碼不用改。
+資料庫本身維持 Postgres 即可（`SPEC.md` ADR-2 的選型理由——訂單狀態機的樂觀鎖、取貨號原子遞增都需要 Postgres 等級的交易一致性），不建議為了配合 Workers 換成 SQLite/D1；改連線方式（Hyperdrive）即可，schema 不需要變動。圖檔儲存已經是 `@aws-sdk/client-s3` 走 S3 相容 API（原本接 MinIO），換成 R2 只需要調整 `STORAGE_*` 環境變數，程式碼不用改。
+
+### Cloudflare 相關指令
+
+```bash
+npm run cf:build      # 本機驗證 Workers 建置（不需要真的部署，就能抓出相容性問題）
+npm run cf:preview    # 本機用 Workers runtime（Miniflare）預覽
+npm run cf:deploy     # 建置並部署到 Cloudflare
+npm run cf:typegen    # 從 wrangler.jsonc 的 binding 設定產生正式的 cloudflare-env.d.ts
+```
+
+首次部署前需要：`npx wrangler login`，然後照上面第 3 點建立 Hyperdrive 資源並把 id 填進 `wrangler.jsonc`。
 
 ## 專案結構
 

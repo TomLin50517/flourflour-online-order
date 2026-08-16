@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth, signOut } from "@/auth";
 
 export default async function AdminDashboardLayout({
@@ -7,6 +8,12 @@ export default async function AdminDashboardLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
+  // 見 docs/OPEN-QUESTIONS.md：原本在 middleware 做的登入檢查，改到這裡——
+  // (dashboard) route group 涵蓋所有需要登入的後台頁面，/admin/login 不在
+  // 這個 group 內，不受影響。
+  if (!session) {
+    redirect("/admin/login");
+  }
 
   return (
     <div className="min-h-screen bg-muted/20">

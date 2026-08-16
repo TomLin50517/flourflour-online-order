@@ -7,7 +7,53 @@ const storageUrl = process.env.STORAGE_PUBLIC_BASE_URL
   ? new URL(process.env.STORAGE_PUBLIC_BASE_URL)
   : undefined;
 
+// 見 docs/OPEN-QUESTIONS.md：原本在 middleware（src/proxy.ts）統一設定的安全標頭，
+// 改到這裡——這幾個標頭都是靜態值（不依請求內容動態決定，`isProduction` 在
+// build time 就固定），天生適合宣告式設定，不需要 middleware。
+// CSP 對 script-src/style-src 使用 'unsafe-inline'：App Router 的 hydration/RSC
+// 內嵌 script、以及本專案手刻圖表元件（TrendChart/TopProductsChart）用到的
+// React inline style prop，都需要它；要收緊成 nonce-based CSP 需要另外設計
+// nonce 產生與透傳機制，列為未來加強項。
+const storageOrigin = (() => {
+  try {
+    return process.env.STORAGE_PUBLIC_BASE_URL ? new URL(process.env.STORAGE_PUBLIC_BASE_URL).origin : null;
+  } catch {
+    return null;
+  }
+})();
+
+// React/Next.js 開發模式的 Fast Refresh 會用到 eval()（正式環境不會，React 官方
+// 文件本身也這麼說明），故 'unsafe-eval' 只在非正式環境放行。
+const isProduction = process.env.NODE_ENV === "production";
+
+const CSP = [
+  "default-src 'self'",
+  `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"}`,
+  "style-src 'self' 'unsafe-inline'",
+  `img-src 'self' data: blob:${storageOrigin ? ` ${storageOrigin}` : ""}`,
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
 const nextConfig: NextConfig = {
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: CSP },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "X-Frame-Options", value: "DENY" },
+          // 瀏覽器只會信任經 HTTPS 送出的 HSTS 標頭，本機 HTTP 開發環境送這個標頭無害。
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+        ],
+      },
+    ];
+  },
   images: {
     remotePatterns: storageUrl
       ? [
