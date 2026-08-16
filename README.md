@@ -65,7 +65,7 @@ npm run stats:rebuild -- --from=2026-08-01 --to=2026-08-31   # 由訂單明細�
 
 1. ~~`src/proxy.ts`（Next.js Middleware）被判定為需要 Node.js runtime~~ **已解決**：查證 Next.js 16 官方文件確認 `proxy.ts` 架構性地宣告為 Node.js runtime、無法改成 edge（跟檔案裡 import 什麼無關，`runtime` config 選項在 Proxy 檔案裡設定了會直接拋錯），是 Next.js 16 新 Proxy 架構與 `@opennextjs/cloudflare` adapter 之間的已知生態相容性落差（[cloudflare/workers-sdk#13937](https://github.com/cloudflare/workers-sdk/issues/13937)）。解法是**整個移除 `src/proxy.ts`**，把裡面做的四件事（後台登入檢查、安全標頭、requestId、根路徑語言協商）分散到不受這個限制的地方（layout／`next.config.ts`／`app/page.tsx`）。已用 `npm run cf:build` 驗證整個建置一路跑完，無任何 middleware 相關錯誤。細節見 `docs/OPEN-QUESTIONS.md`。
 2. ~~`bcrypt`（後台登入密碼比對）是原生 C++ binding，Workers runtime 不支援~~ **已解決**：換成純 JS 的 `bcryptjs`（同樣的 `$2b$` hash 格式、相容 API），已用瀏覽器實測既有帳號（密碼 hash 是舊版 `bcrypt` 產生的）仍能正常登入。見 `docs/OPEN-QUESTIONS.md`。
-3. Prisma 走 TCP 連線，Workers runtime 預設不能開 TCP 連線到資料庫：`src/lib/db.ts` 已改成依 runtime 切換——本機 Node.js 用 `process.env.DATABASE_URL` 走既有的 module-level 單例；偵測到 Cloudflare Workers（`navigator.userAgent === "Cloudflare-Workers"`）時動態載入 `@opennextjs/cloudflare`，透過 `env.HYPERDRIVE.connectionString` 走 Hyperdrive binding，每個請求各自建立 `PrismaClient`（`maxUses: 1`）。`wrangler.jsonc` 已加入 Hyperdrive binding 佔位（`id` 是假值）。**尚未完成**：實際建立 Hyperdrive 資源需要 Cloudflare 帳號權限，這步驟只能由專案擁有者自己做——`npx wrangler login` 後執行 `npx wrangler hyperdrive create <NAME> --connection-string="<Supabase Direct connection URI>"`（Supabase 官方建議 Hyperdrive 要接 **Direct connection**，不是 Session pooler——Hyperdrive 自己會做連線池化，且 Cloudflare 的網路本身有 IPv6，不受本機開發環境的 IPv6 限制影響），再把輸出的真實 id 填回 `wrangler.jsonc`。跑 `npm run cf:typegen` 可以把 `cloudflare-env.d.ts` 換成用 `wrangler types` 產生的正式版本。
+3. ~~Prisma 走 TCP 連線，Workers runtime 預設不能開 TCP 連線到資料庫~~ **已解決**：`src/lib/db.ts` 依 runtime 切換——本機 Node.js 用 `process.env.DATABASE_URL` 走既有的 module-level 單例；偵測到 Cloudflare Workers（`navigator.userAgent === "Cloudflare-Workers"`）時動態載入 `@opennextjs/cloudflare`，透過 `env.HYPERDRIVE.connectionString` 走 Hyperdrive binding，每個請求各自建立 `PrismaClient`（`maxUses: 1`）。真正的 Hyperdrive 資源已經建立（`npx wrangler login` + `npx wrangler hyperdrive create`，上游接 Supabase 的 Direct connection——Supabase 官方建議接這個而非 Session pooler，Hyperdrive 自己會做連線池化，且 Cloudflare 網路有 IPv6，不受本機開發環境的 IPv6 限制影響），id 已填進 `wrangler.jsonc`。`cloudflare-env.d.ts` 已用 `npm run cf:typegen` 產生正式版本——注意這裡踩過一個坑：`wrangler types` 預設（`--include-runtime` 預設 `true`）會把完整 Workers runtime 全域型別內嵌進來，跟 Node.js 的 `Buffer`／`fetch` 等全域型別衝突，導致本機程式碼一堆型別錯誤；`cf:typegen` script 已加上 `--include-runtime=false` 修掉這個問題。細節見 `docs/OPEN-QUESTIONS.md`。
 4. ~~圖檔上傳（`src/app/api/v1/admin/uploads/route.ts`）用 `sharp` 做 webp 轉檔，`sharp` 是原生 binding，Workers runtime 不支援~~ **已解決**：換成 `@cf-wasm/photon`（WASM，`/node`／`/workerd`／`/edge-light` 皆可用）。過程中發現並繞開了該套件 `rotate()` 的一個色彩正確性 bug（改用手動 raw-pixel 座標搬移做 90/180/270 度旋轉），且 `get_bytes_webp()` 只支援無損壓縮（無 `sharp` 原本的 quality 82 有損選項，輸出檔案會較大——SPEC 沒有規定要有損壓縮，故不算違反規格，但是已知的效能取捨）。已用實際 HTTP 上傳（`/api/v1/admin/uploads`）＋瀏覽器解碼驗證輸出是有效 webp。細節見 `docs/OPEN-QUESTIONS.md`。
 
 資料庫本身維持 Postgres 即可（`SPEC.md` ADR-2 的選型理由——訂單狀態機的樂觀鎖、取貨號原子遞增都需要 Postgres 等級的交易一致性），不建議為了配合 Workers 換成 SQLite/D1；改連線方式（Hyperdrive）即可，schema 不需要變動。圖檔儲存已經是 `@aws-sdk/client-s3` 走 S3 相容 API（原本接 MinIO），換成 R2 只需要調整 `STORAGE_*` 環境變數，程式碼不用改。
@@ -79,7 +79,7 @@ npm run cf:deploy     # 建置並部署到 Cloudflare
 npm run cf:typegen    # 從 wrangler.jsonc 的 binding 設定產生正式的 cloudflare-env.d.ts
 ```
 
-首次部署前需要：`npx wrangler login`，然後照上面第 3 點建立 Hyperdrive 資源並把 id 填進 `wrangler.jsonc`。
+Hyperdrive 資源已建立、`wrangler.jsonc` 已接上真實 id，`npm run cf:deploy` 可以直接部署。換一台機器（例如 CI）第一次操作時記得先 `npx wrangler login`。
 
 ## 專案結構
 
