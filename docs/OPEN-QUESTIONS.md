@@ -157,3 +157,15 @@
 - 問題：SPEC §13 M6 驗收條件寫「Lighthouse 行動版 Performance ≥ 85」，但這個開發環境沒有 Chrome DevTools 或 `lighthouse` CLI 可用，沒辦法產生正式的 Lighthouse 分數。
 - 暫定假設：改用「已知會影響 Lighthouse Performance 分數的具體項目」逐項檢查與修正，取代跑分：`next/image` 的 `sizes` prop 補齊（避免瀏覽器抓過大的圖片變體）、`next.config.ts` 依實際上傳限制收窄 `deviceSizes`、圖片上傳統一轉 webp 並壓在 1200px 內、`/api/v1/menu` 既有的 `revalidate=60` 快取維持不變。正式 Lighthouse 分數建議在有 Chrome 的環境（本機瀏覽器 DevTools、或 CI 裝 `lighthouse` CLI）另外驗證一次，尤其是部署到正式環境、有真實網路延遲之後再量測才有意義。
 - 影響範圍：`src/components/product/product-detail-view.tsx`、`src/app/[locale]/cart/page.tsx`、`next.config.ts`。
+
+### `auth.ts` 拆成 `auth.config.ts` + `auth.ts`，讓 middleware 保持 edge-safe
+- 里程碑：M6（部署嘗試期間追加）
+- 問題：實際嘗試部署到 Cloudflare Workers（`@opennextjs/cloudflare` adapter）時，建置在 `npx opennextjs-cloudflare build` 這步噴 `ERROR Node.js middleware is not currently supported`。原因是 `src/proxy.ts` 為了在 middleware 判斷 `/admin/*` 是否已登入，import 了 `./auth`，而 `auth.ts` 用同一個 `NextAuth(...)` 呼叫把 Credentials provider 的 `authorize()`（用到 `bcrypt`、Prisma，兩者都是 Node-only）跟給 middleware 用的 `auth` wrapper 綁在同一個檔案匯出，導致 middleware 的 bundle 被連帶判定為需要 Node.js runtime。
+- 解法：採用 Auth.js 官方建議的 edge-safe 拆分模式——新增 `src/auth.config.ts`，只放 middleware 真正需要的設定（`session` 策略、`callbacks`，`providers` 留空）；`src/auth.ts` 疊上完整的 Credentials provider，給 API route handler／Server Component／Server Action 用；`src/proxy.ts` 改成自己用 `authConfig` 另外建一個輕量的 `NextAuth(authConfig).auth`，不再 import 完整版 `auth.ts`。這個拆分跟資料庫放在哪裡無關——不管日後接 Hyperdrive 還是一般 Node.js 主機，都是正確、值得保留的架構。已用瀏覽器手動驗證：未登入導向 `/admin/login`、登入後可進 `/admin/orders`、登出後再次被導向登入頁，三段都正常。
+- 影響範圍：`src/auth.config.ts`（新增）、`src/auth.ts`、`src/proxy.ts`。
+
+### Vitest 關閉 `fileParallelism`，避免多測試檔併發搶 Postgres 連線
+- 里程碑：M6
+- 問題：隨著里程碑增加、測試檔數量變多（現有 15 個 Vitest 檔案），`npm run test` 會間歇性（後期變成穩定重現）在 `tests/pickup-number.test.ts` 的「200 筆併發配號」測試噴 `Unable to start a transaction in the given time`。原因是 Vitest 預設把不同測試檔分派到多個平行 worker process，每個 process 各自建立一份 Prisma 連線池（`lib/db.ts` 的 singleton 是 per-process，不是全域共用），多個 process 的連線池加總容易超過本機 Postgres 的 `max_connections`，讓那 200 筆併發交易在等待可用連線時逾時。單獨執行該測試檔則完全不會重現（沒有其他 process 在搶連線）。
+- 暫定假設：在 `vitest.config.mts` 設定 `fileParallelism: false`，讓所有測試檔依序執行、共用同一份連線池，避免連線數爭用；用調小 Vitest 檔案並行度換來測試穩定，執行時間仍在可接受範圍（本機約 3–4 秒）。若之後測試檔數量再大幅增加、依序執行時間變得不可接受，才需要考慮改成調大 Postgres `max_connections` 或改用專屬的測試資料庫連線池設定。
+- 影響範圍：`vitest.config.mts`。

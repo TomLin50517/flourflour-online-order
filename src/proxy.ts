@@ -1,11 +1,17 @@
 import { randomUUID } from "node:crypto";
 import createIntlMiddleware from "next-intl/middleware";
+import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
-import { auth } from "./auth";
+import { authConfig } from "./auth.config";
 import { routing } from "./i18n/routing";
 import { applySecurityHeaders } from "./lib/security-headers";
 
 const handleIntl = createIntlMiddleware(routing);
+
+// 見 docs/OPEN-QUESTIONS.md：middleware 只需要「解讀既有 session cookie」，不需要
+// 完整版 ./auth.ts 那個帶 bcrypt／Prisma 的 Credentials provider——用 authConfig
+// 另外建一個輕量 instance，讓 middleware 的 bundle 保持 edge-safe。
+const { auth } = NextAuth(authConfig);
 
 // 見 SPEC.md §4.2：/admin/* 固定 zh-TW，不走語系協商，改由 session 保護。
 // 見 SPEC.md §12.1：安全標頭統一於 middleware 設定，含 /api/* 在內，故 matcher

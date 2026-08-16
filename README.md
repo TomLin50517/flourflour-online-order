@@ -61,13 +61,14 @@ npm run stats:rebuild -- --from=2026-08-01 --to=2026-08-31   # 由訂單明細�
 
 ## 部署備忘
 
-專案本身是一般的 Next.js Server（Node.js runtime），部署到 Vercel 或任何一般 Node.js 主機（Railway/Render/Fly.io 等）沒有已知障礙。若考慮 **Cloudflare Workers**，目前至少有三個已知的相容性問題需要處理，並非開箱即用：
+專案本身是一般的 Next.js Server（Node.js runtime），部署到 Vercel 或任何一般 Node.js 主機（Railway/Render/Fly.io 等）沒有已知障礙。目標架構是 **Cloudflare Workers（網頁）+ R2（圖檔）+ 外部 Postgres（資料庫，經 Hyperdrive 或 Neon 之類的 serverless Postgres）**，目前狀態：
 
-1. `bcrypt`（後台登入密碼比對）是原生 C++ binding，Workers runtime 不支援，需改用純 JS 的 `bcryptjs`。
-2. Prisma 目前用 `@prisma/adapter-pg`（node-postgres，走原生 TCP 連線），Workers runtime 預設不能開 TCP 連線到資料庫，需改用 Cloudflare Hyperdrive，或換成提供 HTTP driver 的 Postgres 代管服務（如 Neon）。
-3. `src/proxy.ts`（Next.js Middleware）目前會被判定為需要 Node.js runtime（因為間接引用了 `bcrypt`／Prisma），Cloudflare 的 `@opennextjs/cloudflare` adapter 目前不支援 Node.js Middleware，需要把 middleware 裡會碰到這些相依的邏輯拆到 Node.js runtime 的路由層，middleware 本身只保留 edge-safe 的部分（語系協商、session cookie 存在與否的判斷）。
+1. ~~`src/proxy.ts`（Next.js Middleware）被判定為需要 Node.js runtime~~ **已解決**：`src/auth.ts` 拆成 `src/auth.config.ts`（edge-safe，middleware 用）+ `src/auth.ts`（完整版，含 `bcrypt`／Prisma 的 Credentials provider，給 API route／後台頁面用），middleware 改用只吃 `authConfig` 的輕量 `NextAuth` instance，不再連帶引用 `bcrypt`／Prisma。見 `docs/OPEN-QUESTIONS.md`。
+2. `bcrypt`（後台登入密碼比對）是原生 C++ binding，Workers runtime 不支援，需改用純 JS 的 `bcryptjs`。**尚未處理**——現在只解決了 middleware 這層，真正呼叫 `bcrypt.compare()` 的 `src/auth.ts`／`prisma/seed.ts` 還是會在 Workers runtime 執行期報錯，因為它們是 API route handler／腳本，不受第 1 點的 middleware 限制。
+3. Prisma 目前用 `@prisma/adapter-pg`（node-postgres，走原生 TCP 連線），Workers runtime 預設不能開 TCP 連線到資料庫，需改用 Cloudflare Hyperdrive，或換成提供 HTTP driver 的 Postgres 代管服務（如 Neon）。**尚未處理**，等資料庫平台確定後再接。
+4. 圖檔上傳（`src/app/api/v1/admin/uploads/route.ts`）用 `sharp` 做 magic bytes 驗證與 webp 轉檔，`sharp` 是原生 binding，Workers runtime 同樣不支援，需要確認 `@opennextjs/cloudflare` 對這類 route 的支援程度，或考慮把轉檔搬到 Cloudflare Images／另一個有 Node.js runtime 的服務。**尚未驗證**。
 
-資料庫本身維持 Postgres 即可（`SPEC.md` ADR-2 的選型理由——訂單狀態機的樂觀鎖、取貨號原子遞增都需要 Postgres 等級的交易一致性），不建議為了配合 Workers 換成 SQLite/D1；改連線方式（Hyperdrive 或 Neon 之類的 serverless Postgres）即可，schema 不需要變動。
+資料庫本身維持 Postgres 即可（`SPEC.md` ADR-2 的選型理由——訂單狀態機的樂觀鎖、取貨號原子遞增都需要 Postgres 等級的交易一致性），不建議為了配合 Workers 換成 SQLite/D1；改連線方式（Hyperdrive 或 Neon 之類的 serverless Postgres）即可，schema 不需要變動。圖檔儲存已經是 `@aws-sdk/client-s3` 走 S3 相容 API（原本接 MinIO），換成 R2 只需要調整 `STORAGE_*` 環境變數，程式碼不用改。
 
 ## 專案結構
 

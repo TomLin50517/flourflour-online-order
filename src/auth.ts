@@ -1,14 +1,17 @@
 import bcrypt from "bcrypt";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import { authConfig } from "./auth.config";
 import { getClientIp } from "@/lib/client-ip";
 import { prisma } from "@/lib/db";
 import { clearLoginFailures, isLockedOut, recordLoginFailure } from "@/lib/login-guard";
 import { checkRateLimit } from "@/lib/rate-limit";
 
+// 見 src/auth.config.ts：這個檔案疊上完整的 Credentials provider（含 bcrypt／
+// Prisma），只給 API route handler／Server Component／Server Action 用。
+// middleware 改用 src/proxy.ts 自己另外建立的、只吃 authConfig 的輕量 instance。
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  session: { strategy: "jwt" },
-  pages: { signIn: "/admin/login" },
+  ...authConfig,
   providers: [
     Credentials({
       credentials: {
@@ -51,18 +54,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
   ],
-  callbacks: {
-    jwt({ token, user }) {
-      if (user) {
-        token.role = user.role;
-        token.id = user.id;
-      }
-      return token;
-    },
-    session({ session, token }) {
-      if (token.id) session.user.id = token.id;
-      if (token.role) session.user.role = token.role;
-      return session;
-    },
-  },
 });
