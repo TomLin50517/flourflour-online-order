@@ -38,7 +38,13 @@ export default async function LocaleLayout(props: LayoutProps<"/[locale]">) {
   return (
     <html lang={locale}>
       <body>
-        <NextIntlClientProvider>
+        {/* 見 docs/OPEN-QUESTIONS.md：移除 middleware 後，next-intl 自動偵測目前
+            locale 的機制（原本部分依賴 middleware 設定的線索）不可靠，client
+            端的 useRouter()/Link 等 navigation helper 會退回 defaultLocale，
+            導致「加入購物車」等導航跳到錯誤語系。這裡的 `locale` 來自路由本身
+            的 `params.locale`（Next.js 原生機制，不依賴 middleware），明確傳入
+            避免依賴自動偵測。 */}
+        <NextIntlClientProvider locale={locale}>
           <Header storeName={store?.name ?? ""} />
           {props.children}
         </NextIntlClientProvider>
