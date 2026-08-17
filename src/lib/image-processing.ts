@@ -1,5 +1,17 @@
 import { PhotonImage, SamplingFilter, fliph, flipv, resize } from "@cf-wasm/photon/node";
 
+// 見 docs/OPEN-QUESTIONS.md：正式站 /api/v1/admin/uploads 500（CompileError:
+// Wasm code generation disallowed by embedder）——原因是這裡固定走 /node
+// 進入點（執行期動態編譯 wasm，Cloudflare Workers 禁止）。已實測 /workerd
+// 進入點（靜態 wasm binding，Workers 允許）在建置階段就會炸：Next.js 的
+// Turbopack 與 webpack（含 asyncWebAssembly 實驗選項）在解析
+// `dist/workerd.js` 的 `import wasmModule from "*.wasm"` 時都失敗，即使把
+// @cf-wasm/photon 標成 serverExternalPackages 仍會在 tracing 階段炸——
+// 這是 Next.js bundler 對這種 wasm-bindgen 產生的靜態 import 語法的已知
+// 相容性落差（跟 Prisma 7 wasm query compiler 那次是同一類上游問題）。
+// 暫時維持 /node（本機開發/測試不受影響），正式站的圖片上傳功能待進一步
+// 處理（見 docs/OPEN-QUESTIONS.md 的完整記錄與待選方案）。
+
 export type DetectedImageType = "image/jpeg" | "image/png" | "image/webp";
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
