@@ -1,6 +1,6 @@
 /**
  * 見 SPEC.md §6.3：將 UTC 時間轉為門市時區後，若本地時間 < businessDayCutoff（HH:mm），
- * 營業日視為前一天。回傳 UTC 午夜的 Date，供 Prisma @db.Date 欄位使用。
+ * 營業日視為前一天。回傳 UTC 午夜的 Date，供 Drizzle 的 date("...", { mode: "date" }) 欄位使用。
  */
 export function toBusinessDate(at: Date, timezone: string, cutoff: string): Date {
   const parts = new Intl.DateTimeFormat("en-US", {

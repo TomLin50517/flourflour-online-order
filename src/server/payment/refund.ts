@@ -1,4 +1,10 @@
-import { getDb } from "@/lib/db";
+import { and, desc, eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import {
+  order as orderTable,
+  orderItem as orderItemTable,
+  payment as paymentTable,
+} from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { getPaymentProvider } from "@/lib/payment/registry";
 import type { ProviderCode } from "@/lib/payment/types";
@@ -27,8 +33,8 @@ export async function refundOrder(input: {
   reason: string;
   actorId: string;
 }) {
-  const prisma = await getDb();
-  const order = await prisma.order.findUnique({ where: { id: input.orderId } });
+  const db = await getDb();
+  const order = await db.query.order.findFirst({ where: eq(orderTable.id, input.orderId) });
   if (!order) {
     throw new AppError("NOT_FOUND", "訂單不存在");
   }
@@ -38,9 +44,9 @@ export async function refundOrder(input: {
   }
   const businessDate = order.businessDate;
 
-  const payment = await prisma.payment.findFirst({
-    where: { orderId: order.id, status: "SUCCEEDED" },
-    orderBy: { paidAt: "desc" },
+  const payment = await db.query.payment.findFirst({
+    where: and(eq(paymentTable.orderId, order.id), eq(paymentTable.status, "SUCCEEDED")),
+    orderBy: [desc(paymentTable.paidAt)],
   });
   if (!payment || !payment.providerRef) {
     throw new NoSuccessfulPaymentError();
@@ -56,11 +62,11 @@ export async function refundOrder(input: {
     throw new AppError("CONFLICT", "廠商拒絕此筆退款", { providerRef: payment.providerRef });
   }
 
-  const refunded = await prisma.$transaction(async (tx) => {
-    await tx.payment.update({
-      where: { id: payment.id },
-      data: { status: "REFUNDED", refundedAt: new Date() },
-    });
+  const refunded = await db.transaction(async (tx) => {
+    await tx
+      .update(paymentTable)
+      .set({ status: "REFUNDED", refundedAt: new Date() })
+      .where(eq(paymentTable.id, payment.id));
 
     const result = await transition({
       tx,
@@ -74,7 +80,7 @@ export async function refundOrder(input: {
 
     // 見 SPEC.md §11：refundedQty/refundedAmount 歸屬於「原始 paidAt 的營業日」，
     // 不是退款當日，所以用 order.businessDate（PAID 當下配發、退款不會改變）。
-    const items = await tx.orderItem.findMany({ where: { orderId: order.id } });
+    const items = await tx.query.orderItem.findMany({ where: eq(orderItemTable.orderId, order.id) });
     await applyDailyProductSales(tx, "REFUNDED", { storeId: order.storeId, businessDate, items });
 
     return result;

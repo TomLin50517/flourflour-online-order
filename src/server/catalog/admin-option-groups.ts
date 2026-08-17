@@ -1,4 +1,13 @@
-import { getDb } from "@/lib/db";
+import { asc, eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { orThrow } from "@/db/helpers";
+import {
+  optionGroup as optionGroupTable,
+  optionGroupTranslation as optionGroupTranslationTable,
+  optionItem as optionItemTable,
+  optionItemTranslation as optionItemTranslationTable,
+  productOptionGroup as productOptionGroupTable,
+} from "@/db/schema";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { toDbLocale, type Locale } from "@/lib/i18n/locale-map";
 import { writeAuditLog } from "@/server/admin/audit-log";
@@ -28,15 +37,15 @@ function assertBounds(selectType: "SINGLE" | "MULTIPLE", minSelect: number, maxS
 }
 
 export async function listOptionGroupsAdmin() {
-  const prisma = await getDb();
-  const store = await prisma.store.findFirstOrThrow();
-  return prisma.optionGroup.findMany({
-    where: { storeId: store.id },
-    include: {
+  const db = await getDb();
+  const store = orThrow(await db.query.store.findFirst());
+  return db.query.optionGroup.findMany({
+    where: eq(optionGroupTable.storeId, store.id),
+    orderBy: [asc(optionGroupTable.code)],
+    with: {
       translations: true,
-      items: { include: { translations: true }, orderBy: { sortOrder: "asc" } },
+      items: { with: { translations: true }, orderBy: (t, { asc }) => asc(t.sortOrder) },
     },
-    orderBy: { code: "asc" },
   });
 }
 
@@ -52,30 +61,63 @@ export async function createOptionGroup(
   actorId: string,
 ) {
   assertBounds(input.selectType, input.minSelect, input.maxSelect);
-  const prisma = await getDb();
-  const store = await prisma.store.findFirstOrThrow();
+  const db = await getDb();
+  const store = orThrow(await db.query.store.findFirst());
 
-  const group = await prisma.optionGroup.create({
-    data: {
-      storeId: store.id,
-      code: input.code,
-      selectType: input.selectType,
-      minSelect: input.minSelect,
-      maxSelect: input.maxSelect,
-      translations: { create: translationRows(input.translations) },
-      items: {
-        create: input.items.map((item, index) => ({
-          code: item.code,
-          priceDelta: item.priceDelta,
-          sortOrder: item.sortOrder ?? index,
-          isDefault: item.isDefault ?? false,
-          isActive: item.isActive ?? true,
-          translations: { create: translationRows(item.translations) },
-        })),
-      },
-    },
-    include: { translations: true, items: { include: { translations: true } } },
+  const group = await db.transaction(async (tx) => {
+    const [groupRow] = await tx
+      .insert(optionGroupTable)
+      .values({
+        storeId: store.id,
+        code: input.code,
+        selectType: input.selectType,
+        minSelect: input.minSelect,
+        maxSelect: input.maxSelect,
+      })
+      .returning();
+
+    const translations = input.translations.length
+      ? await tx
+          .insert(optionGroupTranslationTable)
+          .values(translationRows(input.translations).map((t) => ({ ...t, groupId: groupRow.id })))
+          .returning()
+      : [];
+
+    const insertedItems = input.items.length
+      ? await tx
+          .insert(optionItemTable)
+          .values(
+            input.items.map((item, index) => ({
+              groupId: groupRow.id,
+              code: item.code,
+              priceDelta: item.priceDelta,
+              sortOrder: item.sortOrder ?? index,
+              isDefault: item.isDefault ?? false,
+              isActive: item.isActive ?? true,
+            })),
+          )
+          .returning()
+      : [];
+
+    // 見 docs/DRIZZLE-MIGRATION-SPEC.md §4.2：批次 insert 的 RETURNING 順序跟傳入
+    // 順序一致，用 index 對應回 input.items 找出每個規格項目對應的翻譯。
+    const allItemTranslations = insertedItems.flatMap((itemRow, index) =>
+      translationRows(input.items[index].translations).map((t) => ({ ...t, itemId: itemRow.id })),
+    );
+    const insertedItemTranslations = allItemTranslations.length
+      ? await tx.insert(optionItemTranslationTable).values(allItemTranslations).returning()
+      : [];
+
+    return {
+      ...groupRow,
+      translations,
+      items: insertedItems.map((itemRow) => ({
+        ...itemRow,
+        translations: insertedItemTranslations.filter((t) => t.itemId === itemRow.id),
+      })),
+    };
   });
+
   await writeAuditLog({
     actorId,
     action: "optionGroup.create",
@@ -99,8 +141,8 @@ export async function updateOptionGroup(
   },
   actorId: string,
 ) {
-  const prisma = await getDb();
-  const existing = await prisma.optionGroup.findUnique({ where: { id } });
+  const db = await getDb();
+  const existing = await db.query.optionGroup.findFirst({ where: eq(optionGroupTable.id, id) });
   if (!existing) throw new NotFoundError("規格群組不存在");
 
   const selectType = input.selectType ?? existing.selectType;
@@ -108,41 +150,73 @@ export async function updateOptionGroup(
   const maxSelect = input.maxSelect ?? existing.maxSelect;
   assertBounds(selectType, minSelect, maxSelect);
 
-  const group = await prisma.$transaction(async (tx) => {
+  const group = await db.transaction(async (tx) => {
     if (input.translations) {
-      await tx.optionGroupTranslation.deleteMany({ where: { groupId: id } });
+      await tx.delete(optionGroupTranslationTable).where(eq(optionGroupTranslationTable.groupId, id));
     }
     if (input.items) {
-      await tx.optionItem.deleteMany({ where: { groupId: id } });
+      await tx.delete(optionItemTable).where(eq(optionItemTable.groupId, id));
     }
 
-    return tx.optionGroup.update({
-      where: { id },
-      data: {
-        code: input.code,
-        selectType: input.selectType,
-        minSelect: input.minSelect,
-        maxSelect: input.maxSelect,
-        isActive: input.isActive,
-        translations: input.translations
-          ? { create: translationRows(input.translations) }
-          : undefined,
-        items: input.items
-          ? {
-              create: input.items.map((item, index) => ({
+    // 見 docs/DRIZZLE-MIGRATION-SPEC.md：只更新 translations/items、不帶其他欄位是
+    // 合法的呼叫方式，Drizzle 的 `.set({})` 若全部欄位都是 undefined 會直接拋錯，
+    // 故只在真的有欄位要更新時才呼叫 `.update()`。
+    const patch: Partial<typeof optionGroupTable.$inferInsert> = {};
+    if (input.code !== undefined) patch.code = input.code;
+    if (input.selectType !== undefined) patch.selectType = input.selectType;
+    if (input.minSelect !== undefined) patch.minSelect = input.minSelect;
+    if (input.maxSelect !== undefined) patch.maxSelect = input.maxSelect;
+    if (input.isActive !== undefined) patch.isActive = input.isActive;
+
+    const [groupRow] =
+      Object.keys(patch).length > 0
+        ? await tx.update(optionGroupTable).set(patch).where(eq(optionGroupTable.id, id)).returning()
+        : await tx.select().from(optionGroupTable).where(eq(optionGroupTable.id, id));
+
+    const translations = input.translations
+      ? await tx
+          .insert(optionGroupTranslationTable)
+          .values(translationRows(input.translations).map((t) => ({ ...t, groupId: id })))
+          .returning()
+      : await tx.query.optionGroupTranslation.findMany({ where: eq(optionGroupTranslationTable.groupId, id) });
+
+    let items;
+    if (input.items) {
+      const insertedItems = input.items.length
+        ? await tx
+            .insert(optionItemTable)
+            .values(
+              input.items.map((item, index) => ({
+                groupId: id,
                 code: item.code,
                 priceDelta: item.priceDelta,
                 sortOrder: item.sortOrder ?? index,
                 isDefault: item.isDefault ?? false,
                 isActive: item.isActive ?? true,
-                translations: { create: translationRows(item.translations) },
               })),
-            }
-          : undefined,
-      },
-      include: { translations: true, items: { include: { translations: true } } },
-    });
+            )
+            .returning()
+        : [];
+      const allItemTranslations = insertedItems.flatMap((itemRow, index) =>
+        translationRows(input.items![index].translations).map((t) => ({ ...t, itemId: itemRow.id })),
+      );
+      const insertedItemTranslations = allItemTranslations.length
+        ? await tx.insert(optionItemTranslationTable).values(allItemTranslations).returning()
+        : [];
+      items = insertedItems.map((itemRow) => ({
+        ...itemRow,
+        translations: insertedItemTranslations.filter((t) => t.itemId === itemRow.id),
+      }));
+    } else {
+      items = await tx.query.optionItem.findMany({
+        where: eq(optionItemTable.groupId, id),
+        with: { translations: true },
+      });
+    }
+
+    return { ...groupRow, translations, items };
   });
+
   await writeAuditLog({
     actorId,
     action: "optionGroup.update",
@@ -154,12 +228,12 @@ export async function updateOptionGroup(
 }
 
 export async function deleteOptionGroup(id: string, actorId: string) {
-  const prisma = await getDb();
-  const existing = await prisma.optionGroup.findUnique({ where: { id } });
+  const db = await getDb();
+  const existing = await db.query.optionGroup.findFirst({ where: eq(optionGroupTable.id, id) });
   if (!existing) throw new NotFoundError("規格群組不存在");
-  await prisma.$transaction([
-    prisma.productOptionGroup.deleteMany({ where: { groupId: id } }),
-    prisma.optionGroup.delete({ where: { id } }),
-  ]);
+  await db.transaction(async (tx) => {
+    await tx.delete(productOptionGroupTable).where(eq(productOptionGroupTable.groupId, id));
+    await tx.delete(optionGroupTable).where(eq(optionGroupTable.id, id));
+  });
   await writeAuditLog({ actorId, action: "optionGroup.delete", targetType: "OptionGroup", targetId: id });
 }

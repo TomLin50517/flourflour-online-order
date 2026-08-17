@@ -1,16 +1,25 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDb } from "@/lib/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { orThrow } from "@/db/helpers";
+import {
+  order as orderTable,
+  orderEvent as orderEventTable,
+  payment as paymentTable,
+  paymentEvent as paymentEventTable,
+} from "@/db/schema";
+import { getDb } from "@/db/client";
 
-const prisma = await getDb();
+const db = await getDb();
 import { signMockPayload } from "@/lib/payment/providers/mock";
 import type { RawWebhook } from "@/lib/payment/types";
 import { handlePaymentWebhook, WebhookSignatureError } from "@/server/payment/webhook";
 
 async function createTestOrder(totalAmount: number) {
-  const store = await prisma.store.findFirstOrThrow();
-  return prisma.order.create({
-    data: {
+  const store = orThrow(await db.query.store.findFirst());
+  const [row] = await db
+    .insert(orderTable)
+    .values({
       storeId: store.id,
       orderNo: `M4TEST-${randomUUID()}`,
       accessToken: randomUUID(),
@@ -20,14 +29,17 @@ async function createTestOrder(totalAmount: number) {
       subtotalAmount: totalAmount,
       totalAmount,
       expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-    },
-  });
+    })
+    .returning();
+  return orThrow(row);
 }
 
-function createTestPayment(orderId: string, amount: number, providerRef: string) {
-  return prisma.payment.create({
-    data: { orderId, provider: "mock", providerRef, status: "PENDING", amount, idempotencyKey: randomUUID() },
-  });
+async function createTestPayment(orderId: string, amount: number, providerRef: string) {
+  const [row] = await db
+    .insert(paymentTable)
+    .values({ orderId, provider: "mock", providerRef, status: "PENDING", amount, idempotencyKey: randomUUID() })
+    .returning();
+  return orThrow(row);
 }
 
 function buildRaw(payload: unknown, signatureOverride?: string): RawWebhook {
@@ -43,10 +55,14 @@ let testOrderIds: string[] = [];
 let testProviderEventIds: string[] = [];
 
 afterEach(async () => {
-  await prisma.paymentEvent.deleteMany({ where: { providerEventId: { in: testProviderEventIds } } });
-  await prisma.orderEvent.deleteMany({ where: { orderId: { in: testOrderIds } } });
-  await prisma.payment.deleteMany({ where: { orderId: { in: testOrderIds } } });
-  await prisma.order.deleteMany({ where: { id: { in: testOrderIds } } });
+  if (testProviderEventIds.length > 0) {
+    await db.delete(paymentEventTable).where(inArray(paymentEventTable.providerEventId, testProviderEventIds));
+  }
+  if (testOrderIds.length > 0) {
+    await db.delete(orderEventTable).where(inArray(orderEventTable.orderId, testOrderIds));
+    await db.delete(paymentTable).where(inArray(paymentTable.orderId, testOrderIds));
+    await db.delete(orderTable).where(inArray(orderTable.id, testOrderIds));
+  }
   testOrderIds = [];
   testProviderEventIds = [];
 });
@@ -70,9 +86,11 @@ describe("handlePaymentWebhook", () => {
 
     await expect(handlePaymentWebhook("mock", raw)).rejects.toThrow(WebhookSignatureError);
 
-    const reloaded = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    const reloaded = orThrow(await db.query.order.findFirst({ where: eq(orderTable.id, order.id) }));
     expect(reloaded.status).toBe("PENDING_PAYMENT");
-    const events = await prisma.paymentEvent.findMany({ where: { providerEventId: payload.providerEventId } });
+    const events = await db.query.paymentEvent.findMany({
+      where: eq(paymentEventTable.providerEventId, payload.providerEventId),
+    });
     expect(events).toHaveLength(0);
   });
 
@@ -96,15 +114,15 @@ describe("handlePaymentWebhook", () => {
     const outcome = await handlePaymentWebhook("mock", buildRaw(payload));
     expect(outcome).toBe("PROCESSED");
 
-    const reloaded = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    const reloaded = orThrow(await db.query.order.findFirst({ where: eq(orderTable.id, order.id) }));
     expect(reloaded.status).toBe("PAID");
     expect(reloaded.pickupNumber).not.toBeNull();
     expect(reloaded.paidAt).not.toBeNull();
 
-    const payment = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+    const payment = orThrow(await db.query.payment.findFirst({ where: eq(paymentTable.orderId, order.id) }));
     expect(payment.status).toBe("SUCCEEDED");
 
-    const events = await prisma.orderEvent.findMany({ where: { orderId: order.id } });
+    const events = await db.query.orderEvent.findMany({ where: eq(orderEventTable.orderId, order.id) });
     expect(events).toHaveLength(1);
     expect(events[0].toStatus).toBe("PAID");
   });
@@ -133,11 +151,11 @@ describe("handlePaymentWebhook", () => {
     expect(first).toBe("PROCESSED");
     expect(second).toBe("DUPLICATE");
 
-    const events = await prisma.orderEvent.findMany({ where: { orderId: order.id } });
+    const events = await db.query.orderEvent.findMany({ where: eq(orderEventTable.orderId, order.id) });
     expect(events).toHaveLength(1); // 沒有因重送而重複轉移
 
-    const paymentEvents = await prisma.paymentEvent.findMany({
-      where: { provider: "mock", providerEventId: payload.providerEventId },
+    const paymentEvents = await db.query.paymentEvent.findMany({
+      where: and(eq(paymentEventTable.provider, "mock"), eq(paymentEventTable.providerEventId, payload.providerEventId)),
     });
     expect(paymentEvents).toHaveLength(1);
   });
@@ -162,11 +180,11 @@ describe("handlePaymentWebhook", () => {
     const outcome = await handlePaymentWebhook("mock", buildRaw(payload));
     expect(outcome).toBe("AMOUNT_MISMATCH");
 
-    const reloaded = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    const reloaded = orThrow(await db.query.order.findFirst({ where: eq(orderTable.id, order.id) }));
     expect(reloaded.status).toBe("PENDING_PAYMENT");
     expect(reloaded.pickupNumber).toBeNull();
 
-    const payment = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+    const payment = orThrow(await db.query.payment.findFirst({ where: eq(paymentTable.orderId, order.id) }));
     expect(payment.failureCode).toBe("AMOUNT_MISMATCH");
   });
 });

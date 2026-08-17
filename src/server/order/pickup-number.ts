@@ -1,4 +1,4 @@
-import type { Prisma } from "@/generated/prisma/client";
+import type { Tx } from "@/db/client";
 import { toBusinessDate } from "./business-date";
 import { nextSeq } from "./counter";
 
@@ -15,7 +15,7 @@ export type PickupStoreConfig = {
  * 見 SPEC.md §6.3。只能在 PENDING_PAYMENT → PAID 的同一交易內呼叫。
  */
 export async function assignPickupNumber(
-  tx: Prisma.TransactionClient,
+  tx: Tx,
   store: PickupStoreConfig,
   at: Date,
 ) {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { Prisma } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { order as orderTable, payment as paymentTable } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { fromDbLocale } from "@/lib/i18n/locale-map";
 import { maskSensitive } from "@/lib/payment/mask";
@@ -35,10 +36,10 @@ export async function createOrderPayment(input: {
   returnPath: string;
   clientMeta?: { ip?: string; userAgent?: string };
 }): Promise<CreateChargeResult> {
-  const prisma = await getDb();
-  const order = await prisma.order.findUnique({
-    where: { orderNo: input.orderNo },
-    include: { items: true },
+  const db = await getDb();
+  const order = await db.query.order.findFirst({
+    where: eq(orderTable.orderNo, input.orderNo),
+    with: { items: true },
   });
   if (!order) {
     throw new AppError("NOT_FOUND", "訂單不存在");
@@ -65,7 +66,7 @@ export async function createOrderPayment(input: {
     locale: fromDbLocale(order.locale),
     idempotencyKey,
     items: order.items.map((item) => ({
-      name: (item.nameSnapshot as Record<string, string>)[order.locale] ?? "",
+      name: item.nameSnapshot[order.locale] ?? "",
       quantity: item.quantity,
       unitPrice: item.unitPrice,
     })),
@@ -80,18 +81,16 @@ export async function createOrderPayment(input: {
 
   const result = await provider.createCharge(chargeInput);
 
-  await prisma.payment.create({
-    data: {
-      orderId: order.id,
-      provider: providerCode,
-      providerRef: result.providerRef,
-      status: "PENDING",
-      amount: order.totalAmount,
-      currency: order.currency,
-      idempotencyKey,
-      rawRequest: maskSensitive(chargeInput) as Prisma.InputJsonValue,
-      rawResponse: maskSensitive(result) as Prisma.InputJsonValue,
-    },
+  await db.insert(paymentTable).values({
+    orderId: order.id,
+    provider: providerCode,
+    providerRef: result.providerRef,
+    status: "PENDING",
+    amount: order.totalAmount,
+    currency: order.currency,
+    idempotencyKey,
+    rawRequest: maskSensitive(chargeInput),
+    rawResponse: maskSensitive(result),
   });
 
   return result;

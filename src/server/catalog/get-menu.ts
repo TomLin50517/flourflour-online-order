@@ -1,28 +1,28 @@
-import { getDb } from "@/lib/db";
+import { getDb } from "@/db/client";
 import { NotFoundError } from "@/lib/errors";
 import { toDbLocale, type Locale } from "@/lib/i18n/locale-map";
 import { pickTranslation } from "@/lib/i18n/localize";
 import type { Menu } from "./types";
 
 export async function getMenu(locale: Locale): Promise<Menu> {
-  const prisma = await getDb();
+  const db = await getDb();
   const dbLocale = toDbLocale(locale);
 
-  const store = await prisma.store.findFirst();
+  const store = await db.query.store.findFirst();
   if (!store) throw new NotFoundError("Store not found");
 
-  const categories = await prisma.category.findMany({
-    where: { storeId: store.id, isActive: true },
-    orderBy: { sortOrder: "asc" },
-    include: {
+  const categories = await db.query.category.findMany({
+    where: (c, { and, eq }) => and(eq(c.storeId, store.id), eq(c.isActive, true)),
+    orderBy: (c, { asc }) => asc(c.sortOrder),
+    with: {
       translations: true,
       products: {
-        where: { isActive: true, deletedAt: null },
-        orderBy: { sortOrder: "asc" },
-        include: {
+        where: (p, { and, eq, isNull }) => and(eq(p.isActive, true), isNull(p.deletedAt)),
+        orderBy: (p, { asc }) => asc(p.sortOrder),
+        with: {
           translations: true,
-          images: { where: { isPrimary: true }, take: 1 },
-          optionGroups: { select: { groupId: true }, take: 1 },
+          images: { where: (img, { eq }) => eq(img.isPrimary, true), limit: 1 },
+          optionGroups: { columns: { groupId: true }, limit: 1 },
         },
       },
     },

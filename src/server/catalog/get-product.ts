@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { getDb } from "@/db/client";
 import { NotFoundError } from "@/lib/errors";
 import { toDbLocale, type Locale } from "@/lib/i18n/locale-map";
 import { pickTranslation } from "@/lib/i18n/localize";
@@ -8,24 +8,24 @@ export async function getProduct(
   slug: string,
   locale: Locale,
 ): Promise<ProductDetail> {
-  const prisma = await getDb();
+  const db = await getDb();
   const dbLocale = toDbLocale(locale);
 
-  const product = await prisma.product.findFirst({
-    where: { slug, isActive: true, deletedAt: null },
-    include: {
+  const product = await db.query.product.findFirst({
+    where: (p, { and, eq, isNull }) => and(eq(p.slug, slug), eq(p.isActive, true), isNull(p.deletedAt)),
+    with: {
       translations: true,
-      images: { orderBy: { sortOrder: "asc" } },
+      images: { orderBy: (img, { asc }) => asc(img.sortOrder) },
       optionGroups: {
-        orderBy: { sortOrder: "asc" },
-        include: {
+        orderBy: (pog, { asc }) => asc(pog.sortOrder),
+        with: {
           group: {
-            include: {
+            with: {
               translations: true,
               items: {
-                where: { isActive: true },
-                orderBy: { sortOrder: "asc" },
-                include: { translations: true },
+                where: (item, { eq }) => eq(item.isActive, true),
+                orderBy: (item, { asc }) => asc(item.sortOrder),
+                with: { translations: true },
               },
             },
           },

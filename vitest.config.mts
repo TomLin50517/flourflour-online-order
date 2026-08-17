@@ -19,7 +19,7 @@ export default defineConfig({
     // 否則 Vitest 會嘗試載入它並在呼叫 test.beforeAll() 時噴錯。
     exclude: [...configDefaults.exclude, "tests/e2e/**"],
     // 見 docs/OPEN-QUESTIONS.md：測試檔數量隨里程碑增加後，Vitest 預設會把不同
-    // 測試檔分派到多個平行 worker process，每個 process 各自持有一份 Prisma
+    // 測試檔分派到多個平行 worker process，每個 process 各自持有一份資料庫
     // 連線池（同一支 tests/pickup-number.test.ts 內部又會併發打開 200 筆交易）。
     // 多個 process 的連線池加總很容易超過本機 Postgres 的 max_connections，
     // 讓那 200 筆併發交易在等待連線時逾時。改成不同測試檔依序執行（單一

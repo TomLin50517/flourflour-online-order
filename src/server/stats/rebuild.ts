@@ -1,4 +1,7 @@
-import { getDb } from "@/lib/db";
+import { and, eq, gte, isNotNull, lte } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { orThrow } from "@/db/helpers";
+import { dailyProductSales, order as orderTable } from "@/db/schema";
 
 export type RebuildResult = {
   from: Date;
@@ -37,16 +40,17 @@ export async function rebuildDailyProductSales(params: {
   to: Date;
   storeId?: string;
 }): Promise<RebuildResult> {
-  const prisma = await getDb();
-  const store = params.storeId ? { id: params.storeId } : await prisma.store.findFirstOrThrow();
+  const db = await getDb();
+  const store = params.storeId ? { id: params.storeId } : orThrow(await db.query.store.findFirst());
 
-  const orders = await prisma.order.findMany({
-    where: {
-      storeId: store.id,
-      businessDate: { gte: params.from, lte: params.to },
-      paidAt: { not: null },
-    },
-    include: { items: true },
+  const orders = await db.query.order.findMany({
+    where: and(
+      eq(orderTable.storeId, store.id),
+      gte(orderTable.businessDate, params.from),
+      lte(orderTable.businessDate, params.to),
+      isNotNull(orderTable.paidAt),
+    ),
+    with: { items: true },
   });
 
   const byKey = new Map<string, Agg>();
@@ -94,12 +98,18 @@ export async function rebuildDailyProductSales(params: {
     };
   });
 
-  await prisma.$transaction(async (tx) => {
-    await tx.dailyProductSales.deleteMany({
-      where: { storeId: store.id, businessDate: { gte: params.from, lte: params.to } },
-    });
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(dailyProductSales)
+      .where(
+        and(
+          eq(dailyProductSales.storeId, store.id),
+          gte(dailyProductSales.businessDate, params.from),
+          lte(dailyProductSales.businessDate, params.to),
+        ),
+      );
     if (rows.length > 0) {
-      await tx.dailyProductSales.createMany({ data: rows });
+      await tx.insert(dailyProductSales).values(rows);
     }
   });
 

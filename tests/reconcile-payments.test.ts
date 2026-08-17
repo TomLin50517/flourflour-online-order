@@ -1,14 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDb } from "@/lib/db";
+import { eq, inArray } from "drizzle-orm";
+import { orThrow } from "@/db/helpers";
+import {
+  order as orderTable,
+  orderEvent as orderEventTable,
+  payment as paymentTable,
+} from "@/db/schema";
+import { getDb } from "@/db/client";
 
-const prisma = await getDb();
+const db = await getDb();
 import { reconcilePendingPayments } from "@/server/payment/reconcile";
 
 async function createStaleOrder(totalAmount: number) {
-  const store = await prisma.store.findFirstOrThrow();
-  return prisma.order.create({
-    data: {
+  const store = orThrow(await db.query.store.findFirst());
+  const [row] = await db
+    .insert(orderTable)
+    .values({
       storeId: store.id,
       orderNo: `M4TEST-${randomUUID()}`,
       accessToken: randomUUID(),
@@ -19,16 +27,19 @@ async function createStaleOrder(totalAmount: number) {
       totalAmount,
       placedAt: new Date(Date.now() - 10 * 60 * 1000), // 10 分鐘前下單，超過 3 分鐘門檻
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-    },
-  });
+    })
+    .returning();
+  return orThrow(row);
 }
 
 let testOrderIds: string[] = [];
 
 afterEach(async () => {
-  await prisma.orderEvent.deleteMany({ where: { orderId: { in: testOrderIds } } });
-  await prisma.payment.deleteMany({ where: { orderId: { in: testOrderIds } } });
-  await prisma.order.deleteMany({ where: { id: { in: testOrderIds } } });
+  if (testOrderIds.length > 0) {
+    await db.delete(orderEventTable).where(inArray(orderEventTable.orderId, testOrderIds));
+    await db.delete(paymentTable).where(inArray(paymentTable.orderId, testOrderIds));
+    await db.delete(orderTable).where(inArray(orderTable.id, testOrderIds));
+  }
   testOrderIds = [];
 });
 
@@ -39,22 +50,20 @@ describe("reconcilePendingPayments", () => {
 
     // MockProvider.queryCharge 直接讀自家 Payment 表，故先把 Payment 標成 SUCCEEDED
     // 模擬「webhook 遺失，但廠商那邊其實已經扣款成功」的情境。
-    await prisma.payment.create({
-      data: {
-        orderId: order.id,
-        provider: "mock",
-        providerRef: randomUUID(),
-        status: "SUCCEEDED",
-        amount: 120,
-        idempotencyKey: randomUUID(),
-        paidAt: new Date(),
-      },
+    await db.insert(paymentTable).values({
+      orderId: order.id,
+      provider: "mock",
+      providerRef: randomUUID(),
+      status: "SUCCEEDED",
+      amount: 120,
+      idempotencyKey: randomUUID(),
+      paidAt: new Date(),
     });
 
     const result = await reconcilePendingPayments(new Date());
     expect(result.reconciled).toBeGreaterThanOrEqual(1);
 
-    const reloaded = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    const reloaded = orThrow(await db.query.order.findFirst({ where: eq(orderTable.id, order.id) }));
     expect(reloaded.status).toBe("PAID");
     expect(reloaded.pickupNumber).not.toBeNull();
   });
@@ -63,20 +72,18 @@ describe("reconcilePendingPayments", () => {
     const order = await createStaleOrder(80);
     testOrderIds.push(order.id);
 
-    await prisma.payment.create({
-      data: {
-        orderId: order.id,
-        provider: "mock",
-        providerRef: randomUUID(),
-        status: "PENDING",
-        amount: 80,
-        idempotencyKey: randomUUID(),
-      },
+    await db.insert(paymentTable).values({
+      orderId: order.id,
+      provider: "mock",
+      providerRef: randomUUID(),
+      status: "PENDING",
+      amount: 80,
+      idempotencyKey: randomUUID(),
     });
 
     await reconcilePendingPayments(new Date());
 
-    const reloaded = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    const reloaded = orThrow(await db.query.order.findFirst({ where: eq(orderTable.id, order.id) }));
     expect(reloaded.status).toBe("PENDING_PAYMENT");
   });
 });

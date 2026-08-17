@@ -1,10 +1,17 @@
 import { randomBytes } from "node:crypto";
-import type { Prisma } from "@/generated/prisma/client";
+import { and, eq, inArray } from "drizzle-orm";
+import { isUniqueConstraintError, orThrow } from "@/db/helpers";
+import {
+  order as orderTable,
+  orderItem as orderItemTable,
+  orderItemOption as orderItemOptionTable,
+  product as productTable,
+} from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { toDbLocale } from "@/lib/i18n/locale-map";
 import { toTranslationRecord } from "@/lib/i18n/localize";
 import { calcLineTotal, calcSubtotal, calcUnitPrice, sumPriceDeltas } from "@/lib/money";
-import { getDb } from "@/lib/db";
+import { getDb, type Tx } from "@/db/client";
 import type { CreateOrderInput } from "@/schemas/order";
 import { assignOrderNo } from "./order-no";
 
@@ -24,17 +31,22 @@ export class InvalidOptionSelectionError extends AppError {
   }
 }
 
-type ProductWithOptions = Prisma.ProductGetPayload<{
-  include: {
-    translations: true;
-    images: true;
-    optionGroups: {
-      include: {
-        group: { include: { translations: true; items: { include: { translations: true } } } };
-      };
-    };
-  };
-}>;
+async function loadProductsWithOptions(db: Awaited<ReturnType<typeof getDb>>, storeId: string, productIds: string[]) {
+  return db.query.product.findMany({
+    where: and(inArray(productTable.id, productIds), eq(productTable.storeId, storeId)),
+    with: {
+      translations: true,
+      images: true,
+      optionGroups: {
+        with: {
+          group: { with: { translations: true, items: { with: { translations: true } } } },
+        },
+      },
+    },
+  });
+}
+
+type ProductWithOptions = Awaited<ReturnType<typeof loadProductsWithOptions>>[number];
 
 type PreparedOption = {
   optionItemId: string;
@@ -138,34 +150,27 @@ function prepareItem(
   };
 }
 
-export async function createOrder(input: CreateOrderInput, idempotencyKey: string) {
-  const prisma = await getDb();
-  const existing = await prisma.order.findUnique({
-    where: { idempotencyKey },
-    include: { items: { include: { options: true } } },
+async function findByIdempotencyKey(db: Awaited<ReturnType<typeof getDb>> | Tx, idempotencyKey: string) {
+  return db.query.order.findFirst({
+    where: eq(orderTable.idempotencyKey, idempotencyKey),
+    with: { items: { with: { options: true } } },
   });
+}
+
+export async function createOrder(input: CreateOrderInput, idempotencyKey: string) {
+  const db = await getDb();
+  const existing = await findByIdempotencyKey(db, idempotencyKey);
   if (existing) {
     return { order: existing, isNew: false };
   }
 
-  const store = await prisma.store.findFirstOrThrow();
+  const store = orThrow(await db.query.store.findFirst());
   if (!store.isOpen) {
     throw new ProductUnavailableError("店家目前休息中，暫不接受新訂單");
   }
 
   const productIds = [...new Set(input.items.map((i) => i.productId))];
-  const products = await prisma.product.findMany({
-    where: { id: { in: productIds }, storeId: store.id },
-    include: {
-      translations: true,
-      images: true,
-      optionGroups: {
-        include: {
-          group: { include: { translations: true, items: { include: { translations: true } } } },
-        },
-      },
-    },
-  });
+  const products = await loadProductsWithOptions(db, store.id, productIds);
   const productById = new Map(products.map((p) => [p.id, p]));
 
   const preparedItems = input.items.map((item) => {
@@ -182,14 +187,15 @@ export async function createOrder(input: CreateOrderInput, idempotencyKey: strin
   const dbLocale = toDbLocale(input.locale);
 
   try {
-    const order = await prisma.$transaction(async (tx) => {
+    const created = await db.transaction(async (tx) => {
       const now = new Date();
       const { orderNo } = await assignOrderNo(tx, store, now);
       const accessToken = randomBytes(32).toString("hex");
       const expiresAt = new Date(now.getTime() + ORDER_EXPIRE_MINUTES * 60 * 1000);
 
-      return tx.order.create({
-        data: {
+      const [newOrder] = await tx
+        .insert(orderTable)
+        .values({
           storeId: store.id,
           orderNo,
           accessToken,
@@ -201,45 +207,58 @@ export async function createOrder(input: CreateOrderInput, idempotencyKey: strin
           customerPhone: input.customer?.phone,
           customerNote: input.note,
           expiresAt,
-          items: {
-            create: preparedItems.map((item) => ({
-              productId: item.productId,
-              quantity: item.quantity,
-              nameSnapshot: item.nameSnapshot,
-              imageUrlSnapshot: item.imageUrlSnapshot,
-              unitBasePrice: item.unitBasePrice,
-              unitOptionsPrice: item.unitOptionsPrice,
-              unitPrice: item.unitPrice,
-              lineTotal: item.lineTotal,
-              options: {
-                create: item.options.map((option) => ({
-                  optionItemId: option.optionItemId,
-                  groupNameSnapshot: option.groupNameSnapshot,
-                  itemNameSnapshot: option.itemNameSnapshot,
-                  priceDelta: option.priceDelta,
-                })),
-              },
-            })),
-          },
-        },
-        include: { items: { include: { options: true } } },
-      });
+        })
+        .returning();
+
+      // 見 docs/DRIZZLE-MIGRATION-SPEC.md §4.2：單一 batch insert 的 RETURNING 順序
+      // 跟傳入的 VALUES 順序一致，故用 index 對應回 preparedItems 找出每個品項的選項。
+      const insertedItems = preparedItems.length
+        ? await tx
+            .insert(orderItemTable)
+            .values(
+              preparedItems.map((item) => ({
+                orderId: newOrder.id,
+                productId: item.productId,
+                quantity: item.quantity,
+                nameSnapshot: item.nameSnapshot,
+                imageUrlSnapshot: item.imageUrlSnapshot,
+                unitBasePrice: item.unitBasePrice,
+                unitOptionsPrice: item.unitOptionsPrice,
+                unitPrice: item.unitPrice,
+                lineTotal: item.lineTotal,
+              })),
+            )
+            .returning()
+        : [];
+
+      const allOptions = insertedItems.flatMap((insertedItem, index) =>
+        preparedItems[index].options.map((option) => ({
+          orderItemId: insertedItem.id,
+          optionItemId: option.optionItemId,
+          groupNameSnapshot: option.groupNameSnapshot,
+          itemNameSnapshot: option.itemNameSnapshot,
+          priceDelta: option.priceDelta,
+        })),
+      );
+      const insertedOptions = allOptions.length
+        ? await tx.insert(orderItemOptionTable).values(allOptions).returning()
+        : [];
+
+      return {
+        ...newOrder,
+        items: insertedItems.map((insertedItem) => ({
+          ...insertedItem,
+          options: insertedOptions.filter((o) => o.orderItemId === insertedItem.id),
+        })),
+      };
     });
 
-    return { order, isNew: true };
+    return { order: created, isNew: true };
   } catch (error) {
     // 併發下兩個相同 Idempotency-Key 的請求都通過了第一次查重，
-    // 唯一索引會讓後到的那筆在此丟出 P2002；直接回原訂單即可。
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code?: string }).code === "P2002"
-    ) {
-      const raceWinner = await prisma.order.findUnique({
-        where: { idempotencyKey },
-        include: { items: { include: { options: true } } },
-      });
+    // 唯一索引會讓後到的那筆在此丟出 unique_violation；直接回原訂單即可。
+    if (isUniqueConstraintError(error)) {
+      const raceWinner = await findByIdempotencyKey(db, idempotencyKey);
       if (raceWinner) {
         return { order: raceWinner, isNew: false };
       }

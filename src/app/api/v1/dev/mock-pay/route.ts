@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { getDb } from "@/lib/db";
+import { getDb } from "@/db/client";
+import { order as orderTable } from "@/db/schema";
 import { AppError, toErrorResponse } from "@/lib/errors";
 import { signMockPayload, type MockWebhookPayload } from "@/lib/payment/providers/mock";
 
@@ -26,8 +28,8 @@ export async function POST(request: NextRequest) {
   try {
     const { orderNo, paymentId, outcome } = bodySchema.parse(await request.json());
 
-    const prisma = await getDb();
-    const order = await prisma.order.findUnique({ where: { orderNo } });
+    const db = await getDb();
+    const order = await db.query.order.findFirst({ where: eq(orderTable.orderNo, orderNo) });
     if (!order) {
       throw new AppError("NOT_FOUND", "訂單不存在");
     }

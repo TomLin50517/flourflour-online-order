@@ -1,24 +1,26 @@
-import type { OrderStatus } from "@/generated/prisma/enums";
-import { getDb } from "@/lib/db";
+import { and, desc, eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { orThrow } from "@/db/helpers";
+import { order as orderTable, type OrderStatus } from "@/db/schema";
 import { refundOrder } from "@/server/payment/refund";
 import { writeAuditLog } from "@/server/admin/audit-log";
 import { transition, type ActorType } from "./state-machine";
 
 export async function listOrdersAdmin(filters: { status?: OrderStatus; pickupNumber?: string }) {
-  const prisma = await getDb();
-  const store = await prisma.store.findFirstOrThrow();
-  return prisma.order.findMany({
-    where: {
-      storeId: store.id,
-      ...(filters.status ? { status: filters.status } : {}),
-      ...(filters.pickupNumber ? { pickupNumber: filters.pickupNumber } : {}),
-    },
-    orderBy: { placedAt: "desc" },
-    include: { items: true },
+  const db = await getDb();
+  const store = orThrow(await db.query.store.findFirst());
+  return db.query.order.findMany({
+    where: and(
+      eq(orderTable.storeId, store.id),
+      filters.status ? eq(orderTable.status, filters.status) : undefined,
+      filters.pickupNumber ? eq(orderTable.pickupNumber, filters.pickupNumber) : undefined,
+    ),
+    orderBy: [desc(orderTable.placedAt)],
+    with: { items: true },
   });
 }
 
-function buildExtraData(toStatus: OrderStatus, note?: string) {
+function buildExtraData(toStatus: OrderStatus, note?: string): Partial<typeof orderTable.$inferInsert> | undefined {
   const now = new Date();
   switch (toStatus) {
     case "READY":
@@ -51,8 +53,8 @@ export async function updateOrderStatusAdmin(input: {
     });
   }
 
-  const prisma = await getDb();
-  const order = await prisma.$transaction((tx) =>
+  const db = await getDb();
+  const order = await db.transaction((tx) =>
     transition({
       tx,
       orderId: input.orderId,

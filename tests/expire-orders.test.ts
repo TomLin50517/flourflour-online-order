@@ -1,17 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDb } from "@/lib/db";
+import { eq, inArray } from "drizzle-orm";
+import { orThrow } from "@/db/helpers";
+import { order as orderTable, orderEvent as orderEventTable } from "@/db/schema";
+import { getDb } from "@/db/client";
 
-const prisma = await getDb();
+const db = await getDb();
 import { expireOverdueOrders } from "@/server/order/expire-orders";
 
 // 見 tests/payment-webhook.test.ts 的說明：Vitest 預設會平行跑多個測試檔，
 // 若沿用 state-machine.test.ts 的 "TEST-" 前綴＋依前綴清理的寫法，會被其他檔案
 // 同時進行的清理查詢誤刪。這裡改用專屬前綴＋依實際建立的 id 清理，避免互相干擾。
 async function createOrder(expiresAt: Date) {
-  const store = await prisma.store.findFirstOrThrow();
-  return prisma.order.create({
-    data: {
+  const store = orThrow(await db.query.store.findFirst());
+  const [row] = await db
+    .insert(orderTable)
+    .values({
       storeId: store.id,
       orderNo: `M4TEST-${randomUUID()}`,
       accessToken: randomUUID(),
@@ -21,15 +25,18 @@ async function createOrder(expiresAt: Date) {
       subtotalAmount: 100,
       totalAmount: 100,
       expiresAt,
-    },
-  });
+    })
+    .returning();
+  return orThrow(row);
 }
 
 let testOrderIds: string[] = [];
 
 afterEach(async () => {
-  await prisma.orderEvent.deleteMany({ where: { orderId: { in: testOrderIds } } });
-  await prisma.order.deleteMany({ where: { id: { in: testOrderIds } } });
+  if (testOrderIds.length > 0) {
+    await db.delete(orderEventTable).where(inArray(orderEventTable.orderId, testOrderIds));
+    await db.delete(orderTable).where(inArray(orderTable.id, testOrderIds));
+  }
   testOrderIds = [];
 });
 
@@ -41,11 +48,11 @@ describe("expireOverdueOrders", () => {
     const result = await expireOverdueOrders(new Date());
     expect(result.cancelled).toBeGreaterThanOrEqual(1);
 
-    const reloaded = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    const reloaded = orThrow(await db.query.order.findFirst({ where: eq(orderTable.id, order.id) }));
     expect(reloaded.status).toBe("CANCELLED");
     expect(reloaded.cancelledAt).not.toBeNull();
 
-    const events = await prisma.orderEvent.findMany({ where: { orderId: order.id } });
+    const events = await db.query.orderEvent.findMany({ where: eq(orderEventTable.orderId, order.id) });
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ toStatus: "CANCELLED", actorType: "SYSTEM" });
   });
@@ -56,7 +63,7 @@ describe("expireOverdueOrders", () => {
 
     await expireOverdueOrders(new Date());
 
-    const reloaded = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    const reloaded = orThrow(await db.query.order.findFirst({ where: eq(orderTable.id, order.id) }));
     expect(reloaded.status).toBe("PENDING_PAYMENT");
   });
 });

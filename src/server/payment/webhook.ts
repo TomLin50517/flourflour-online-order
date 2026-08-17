@@ -1,5 +1,12 @@
-import type { Prisma, PrismaClient } from "@/generated/prisma/client";
-import { getDb } from "@/lib/db";
+import { and, desc, eq } from "drizzle-orm";
+import { getDb, type DbOrTx, type Tx } from "@/db/client";
+import { isUniqueConstraintError, orThrow } from "@/db/helpers";
+import {
+  order as orderTable,
+  orderItem as orderItemTable,
+  payment as paymentTable,
+  paymentEvent as paymentEventTable,
+} from "@/db/schema";
 import { maskSensitive } from "@/lib/payment/mask";
 import { getPaymentProvider } from "@/lib/payment/registry";
 import type { ProviderCode, RawWebhook, WebhookEvent } from "@/lib/payment/types";
@@ -16,34 +23,35 @@ export class WebhookSignatureError extends Error {
 
 export type WebhookOutcome = "PROCESSED" | "DUPLICATE" | "AMOUNT_MISMATCH" | "IGNORED";
 
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "P2002"
-  );
-}
-
-function markProcessed(prisma: PrismaClient, eventId: string) {
-  return prisma.paymentEvent.update({ where: { id: eventId }, data: { processedAt: new Date() } });
+function markProcessed(db: DbOrTx, eventId: string) {
+  return db.update(paymentEventTable).set({ processedAt: new Date() }).where(eq(paymentEventTable.id, eventId));
 }
 
 async function findPaymentForEvent(
-  tx: Prisma.TransactionClient,
+  tx: Tx,
   orderId: string,
   providerCode: ProviderCode,
   event: WebhookEvent,
 ) {
-  const byRef = await tx.payment.findFirst({
-    where: { orderId, provider: providerCode, providerRef: event.providerRef },
+  const byRef = await tx.query.payment.findFirst({
+    where: and(
+      eq(paymentTable.orderId, orderId),
+      eq(paymentTable.provider, providerCode),
+      // 見 docs/DRIZZLE-MIGRATION-SPEC.md §4.8：event.providerRef 可能不存在，
+      // 此時原本 Prisma 版本的行為是「不過濾這個欄位」，非「等於空值」。
+      event.providerRef ? eq(paymentTable.providerRef, event.providerRef) : undefined,
+    ),
   });
   if (byRef) return byRef;
 
   // 部分廠商在建立交易時不會馬上回傳 providerRef，退而求其次比對「最近一筆待付款紀錄」。
-  return tx.payment.findFirst({
-    where: { orderId, provider: providerCode, status: "PENDING" },
-    orderBy: { createdAt: "desc" },
+  return tx.query.payment.findFirst({
+    where: and(
+      eq(paymentTable.orderId, orderId),
+      eq(paymentTable.provider, providerCode),
+      eq(paymentTable.status, "PENDING"),
+    ),
+    orderBy: [desc(paymentTable.createdAt)],
   });
 }
 
@@ -60,7 +68,7 @@ export async function handlePaymentWebhook(
   providerCode: ProviderCode,
   raw: RawWebhook,
 ): Promise<WebhookOutcome> {
-  const prisma = await getDb();
+  const db = await getDb();
   const provider = getPaymentProvider(providerCode);
 
   if (!provider.verifySignature(raw)) {
@@ -71,15 +79,16 @@ export async function handlePaymentWebhook(
 
   let eventRow;
   try {
-    eventRow = await prisma.paymentEvent.create({
-      data: {
+    [eventRow] = await db
+      .insert(paymentEventTable)
+      .values({
         provider: providerCode,
         providerEventId: event.providerEventId,
         eventType: event.eventType,
-        payload: maskSensitive(event.raw) as Prisma.InputJsonValue,
+        payload: maskSensitive(event.raw),
         signatureValid: true,
-      },
-    });
+      })
+      .returning();
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       return "DUPLICATE";
@@ -87,65 +96,77 @@ export async function handlePaymentWebhook(
     throw error;
   }
 
-  const order = await prisma.order.findUnique({ where: { orderNo: event.orderNo } });
+  const order = await db.query.order.findFirst({ where: eq(orderTable.orderNo, event.orderNo) });
   if (!order) {
     // 找不到訂單：異常情況，不標記 processedAt，留給補償 job／人工排查；webhook 仍回 200。
     return "IGNORED";
   }
 
   if (event.eventType === "charge.failed" || event.eventType === "charge.cancelled") {
-    await prisma.payment.updateMany({
-      where: { orderId: order.id, provider: providerCode, status: "PENDING" },
-      data: {
+    await db
+      .update(paymentTable)
+      .set({
         status: event.eventType === "charge.failed" ? "FAILED" : "CANCELLED",
         failureCode: event.failure?.code,
         failureMessage: event.failure?.message,
-      },
-    });
-    await markProcessed(prisma, eventRow.id);
+      })
+      .where(
+        and(
+          eq(paymentTable.orderId, order.id),
+          eq(paymentTable.provider, providerCode),
+          eq(paymentTable.status, "PENDING"),
+        ),
+      );
+    await markProcessed(db, eventRow.id);
     return "IGNORED";
   }
 
   if (event.eventType !== "charge.succeeded") {
     // 例如 refund.succeeded／unknown：退款流程由 server/payment/refund.ts 主動觸發，
     // 這裡只記錄事件，不做額外狀態轉移。
-    await markProcessed(prisma, eventRow.id);
+    await markProcessed(db, eventRow.id);
     return "IGNORED";
   }
 
   if (event.amount !== order.totalAmount) {
-    await prisma.payment.updateMany({
-      where: { orderId: order.id, provider: providerCode, status: "PENDING" },
-      data: {
+    await db
+      .update(paymentTable)
+      .set({
         failureCode: "AMOUNT_MISMATCH",
         failureMessage: `webhook amount ${event.amount} != order.totalAmount ${order.totalAmount}`,
-      },
-    });
-    await markProcessed(prisma, eventRow.id);
+      })
+      .where(
+        and(
+          eq(paymentTable.orderId, order.id),
+          eq(paymentTable.provider, providerCode),
+          eq(paymentTable.status, "PENDING"),
+        ),
+      );
+    await markProcessed(db, eventRow.id);
     return "AMOUNT_MISMATCH";
   }
 
-  await prisma.$transaction(async (tx) => {
-    const freshOrder = await tx.order.findUniqueOrThrow({ where: { id: order.id } });
+  await db.transaction(async (tx) => {
+    const freshOrder = orThrow(await tx.query.order.findFirst({ where: eq(orderTable.id, order.id) }));
     const payment = await findPaymentForEvent(tx, order.id, providerCode, event);
     const paidAt = event.paidAt ?? new Date();
 
     if (payment) {
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: {
+      await tx
+        .update(paymentTable)
+        .set({
           status: "SUCCEEDED",
           providerRef: event.providerRef,
           method: event.method,
           cardBrand: event.card?.brand,
           cardLast4: event.card?.last4,
           paidAt,
-        },
-      });
+        })
+        .where(eq(paymentTable.id, payment.id));
     }
 
     if (freshOrder.status === "PENDING_PAYMENT") {
-      const store = await tx.store.findFirstOrThrow();
+      const store = orThrow(await tx.query.store.findFirst());
       const { pickupNumber, businessDate, pickupSeq } = await assignPickupNumber(tx, store, paidAt);
 
       await transition({
@@ -158,16 +179,16 @@ export async function handlePaymentWebhook(
       });
 
       // 見 SPEC.md §11：於 → PAID 的同一交易內累加 DailyProductSales。
-      const items = await tx.orderItem.findMany({ where: { orderId: order.id } });
+      const items = await tx.query.orderItem.findMany({ where: eq(orderItemTable.orderId, order.id) });
       await applyDailyProductSales(tx, "PAID", { storeId: store.id, businessDate, items });
     }
     // 訂單已非 PENDING_PAYMENT（例如同一筆交易的重送事件帶了不同 providerEventId）：
     // Payment 已同步更新，視為冪等成功，不重複轉移訂單狀態。
 
-    await tx.paymentEvent.update({
-      where: { id: eventRow.id },
-      data: { processedAt: new Date(), paymentId: payment?.id },
-    });
+    await tx
+      .update(paymentEventTable)
+      .set({ processedAt: new Date(), paymentId: payment?.id })
+      .where(eq(paymentEventTable.id, eventRow.id));
   });
 
   return "PROCESSED";

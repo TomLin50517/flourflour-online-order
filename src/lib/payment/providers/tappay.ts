@@ -1,4 +1,4 @@
-import type { PaymentStatus } from "@/generated/prisma/enums";
+import type { PaymentStatus } from "@/db/schema";
 import { NotImplementedError } from "@/lib/errors";
 import type {
   CreateChargeInput,

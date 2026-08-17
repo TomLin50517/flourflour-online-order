@@ -1,14 +1,14 @@
-import { LocaleCode } from "@/generated/prisma/enums";
+import type { LocaleCode } from "@/db/schema";
 
 export const LOCALES = ["zh-TW", "en", "ja", "ko"] as const;
 export type Locale = (typeof LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = "zh-TW";
 
 const LOCALE_TO_DB: Record<Locale, LocaleCode> = {
-  "zh-TW": LocaleCode.ZH_TW,
-  en: LocaleCode.EN,
-  ja: LocaleCode.JA,
-  ko: LocaleCode.KO,
+  "zh-TW": "ZH_TW",
+  en: "EN",
+  ja: "JA",
+  ko: "KO",
 };
 
 const DB_TO_LOCALE: Record<LocaleCode, Locale> = {

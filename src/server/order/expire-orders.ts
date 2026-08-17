@@ -1,4 +1,6 @@
-import { getDb } from "@/lib/db";
+import { and, eq, lt, gte, lte, sql } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { order as orderTable } from "@/db/schema";
 import { logger } from "@/lib/logger";
 import { ConflictError, InvalidStateTransitionError, transition } from "./state-machine";
 
@@ -13,22 +15,22 @@ const ALERT_THRESHOLD = 0.2;
  * 觸發方式見 docs/OPEN-QUESTIONS.md（本專案無常駐排程器，改由外部 cron 呼叫 admin job 端點）。
  */
 export async function expireOverdueOrders(now: Date = new Date()) {
-  const prisma = await getDb();
-  const overdue = await prisma.order.findMany({
-    where: { status: "PENDING_PAYMENT", expiresAt: { lt: now } },
-    select: { id: true, version: true },
+  const db = await getDb();
+  const overdue = await db.query.order.findMany({
+    where: and(eq(orderTable.status, "PENDING_PAYMENT"), lt(orderTable.expiresAt, now)),
+    columns: { id: true, version: true },
   });
 
   let cancelled = 0;
   let skipped = 0;
 
-  for (const order of overdue) {
+  for (const item of overdue) {
     try {
-      await prisma.$transaction((tx) =>
+      await db.transaction((tx) =>
         transition({
           tx,
-          orderId: order.id,
-          expectedVersion: order.version,
+          orderId: item.id,
+          expectedVersion: item.version,
           toStatus: "CANCELLED",
           actorType: "SYSTEM",
           note: TIMEOUT_CANCEL_REASON,
@@ -50,16 +52,25 @@ export async function expireOverdueOrders(now: Date = new Date()) {
   // 訂單」為樣本，比較其中最終因逾時被取消的比例；樣本數太小（< 5）時比例沒有
   // 統計意義，不告警，避免深夜低流量時段誤報。
   const windowStart = new Date(now.getTime() - ALERT_WINDOW_MS);
-  const [totalPlaced, totalTimedOut] = await Promise.all([
-    prisma.order.count({ where: { placedAt: { gte: windowStart, lte: now } } }),
-    prisma.order.count({
-      where: {
-        placedAt: { gte: windowStart, lte: now },
-        status: "CANCELLED",
-        cancelReason: TIMEOUT_CANCEL_REASON,
-      },
-    }),
+  const [totalPlacedRows, totalTimedOutRows] = await Promise.all([
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(orderTable)
+      .where(and(gte(orderTable.placedAt, windowStart), lte(orderTable.placedAt, now))),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(orderTable)
+      .where(
+        and(
+          gte(orderTable.placedAt, windowStart),
+          lte(orderTable.placedAt, now),
+          eq(orderTable.status, "CANCELLED"),
+          eq(orderTable.cancelReason, TIMEOUT_CANCEL_REASON),
+        ),
+      ),
   ]);
+  const totalPlaced = totalPlacedRows[0]?.count ?? 0;
+  const totalTimedOut = totalTimedOutRows[0]?.count ?? 0;
   if (totalPlaced >= ALERT_MIN_SAMPLE) {
     const timeoutRate = totalTimedOut / totalPlaced;
     if (timeoutRate > ALERT_THRESHOLD) {

@@ -1,8 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDb } from "@/lib/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { orThrow } from "@/db/helpers";
+import {
+  auditLog as auditLogTable,
+  dailyProductSales,
+  order as orderTable,
+  orderEvent as orderEventTable,
+  orderItem as orderItemTable,
+  orderItemOption as orderItemOptionTable,
+  payment as paymentTable,
+  paymentEvent as paymentEventTable,
+  product as productTable,
+} from "@/db/schema";
+import { getDb } from "@/db/client";
 
-const prisma = await getDb();
+const db = await getDb();
 import { signMockPayload } from "@/lib/payment/providers/mock";
 import type { RawWebhook } from "@/lib/payment/types";
 import type { CreateOrderInput } from "@/schemas/order";
@@ -22,7 +35,7 @@ const DAY2 = new Date(Date.UTC(2026, 0, 11, 6, 0, 0)); // → businessDate 2026-
 const TEST_NOTE = "M5TEST_STATS_REBUILD";
 
 async function getProduct(slug: string) {
-  return prisma.product.findFirstOrThrow({ where: { slug } });
+  return orThrow(await db.query.product.findFirst({ where: eq(productTable.slug, slug) }));
 }
 
 function buildWebhookRaw(payload: unknown): RawWebhook {
@@ -57,30 +70,59 @@ async function createAndPay(productId: string, quantity: number, paidAt: Date) {
   return order;
 }
 
+async function getDailyProductSalesRow(storeId: string, businessDate: Date, productId: string) {
+  return orThrow(
+    await db.query.dailyProductSales.findFirst({
+      where: and(
+        eq(dailyProductSales.storeId, storeId),
+        eq(dailyProductSales.businessDate, businessDate),
+        eq(dailyProductSales.productId, productId),
+      ),
+    }),
+  );
+}
+
 // 用 customerNote 標記回查做清理（而非只靠測試內累積的 id 陣列）：如果某次執行
 // 中途丟出例外，還沒記錄下來的訂單就永遠不會被清掉，殘留資料會讓下一次 rebuild
 // 掃描到不該存在的訂單。用標記回查可以連前一次失敗殘留的髒資料一起清乾淨，
 // 是自我修復的（同一構想見 create-order.test.ts 的 customerNote: "TEST_ORDER"）。
 afterEach(async () => {
-  const orders = await prisma.order.findMany({ where: { customerNote: TEST_NOTE } });
+  const orders = await db.query.order.findMany({ where: eq(orderTable.customerNote, TEST_NOTE) });
   const orderIds = orders.map((o) => o.id);
   const businessDates = [
     ...new Set(orders.map((o) => o.businessDate?.getTime()).filter((t): t is number => t != null)),
   ].map((t) => new Date(t));
 
-  await prisma.paymentEvent.deleteMany({ where: { payment: { orderId: { in: orderIds } } } });
-  await prisma.orderEvent.deleteMany({ where: { orderId: { in: orderIds } } });
-  await prisma.auditLog.deleteMany({ where: { targetType: "Order", targetId: { in: orderIds } } });
-  await prisma.payment.deleteMany({ where: { orderId: { in: orderIds } } });
-  await prisma.orderItemOption.deleteMany({ where: { orderItem: { orderId: { in: orderIds } } } });
-  await prisma.orderItem.deleteMany({ where: { orderId: { in: orderIds } } });
-  await prisma.order.deleteMany({ where: { id: { in: orderIds } } });
+  if (orderIds.length > 0) {
+    const payments = await db.query.payment.findMany({
+      where: inArray(paymentTable.orderId, orderIds),
+      columns: { id: true },
+    });
+    const paymentIds = payments.map((p) => p.id);
+    if (paymentIds.length > 0) {
+      await db.delete(paymentEventTable).where(inArray(paymentEventTable.paymentId, paymentIds));
+    }
+    const items = await db.query.orderItem.findMany({
+      where: inArray(orderItemTable.orderId, orderIds),
+      columns: { id: true },
+    });
+    const itemIds = items.map((i) => i.id);
+
+    await db.delete(orderEventTable).where(inArray(orderEventTable.orderId, orderIds));
+    await db.delete(auditLogTable).where(and(eq(auditLogTable.targetType, "Order"), inArray(auditLogTable.targetId, orderIds)));
+    await db.delete(paymentTable).where(inArray(paymentTable.orderId, orderIds));
+    if (itemIds.length > 0) {
+      await db.delete(orderItemOptionTable).where(inArray(orderItemOptionTable.orderItemId, itemIds));
+    }
+    await db.delete(orderItemTable).where(inArray(orderItemTable.orderId, orderIds));
+    await db.delete(orderTable).where(inArray(orderTable.id, orderIds));
+  }
 
   if (businessDates.length > 0) {
-    const store = await prisma.store.findFirstOrThrow();
-    await prisma.dailyProductSales.deleteMany({
-      where: { storeId: store.id, businessDate: { in: businessDates } },
-    });
+    const store = orThrow(await db.query.store.findFirst());
+    await db
+      .delete(dailyProductSales)
+      .where(and(eq(dailyProductSales.storeId, store.id), inArray(dailyProductSales.businessDate, businessDates)));
   }
 });
 
@@ -90,7 +132,7 @@ describe("stats:rebuild consistency", () => {
     // plain-croissant 切成 isSoldOut 來測試錯誤情境，平行執行測試檔時兩者共用
     // plain-croissant 會有競態風險。
     const product = await getProduct("lemon-croissant"); // basePrice 135，addon 規格 minSelect=0（不選也合法）
-    const store = await prisma.store.findFirstOrThrow();
+    const store = orThrow(await db.query.store.findFirst());
 
     await createAndPay(product.id, 2, DAY1); // day1，保留
     const orderB = await createAndPay(product.id, 3, DAY1); // day1，稍後退款
@@ -106,7 +148,7 @@ describe("stats:rebuild consistency", () => {
       randomUUID(),
     );
 
-    const freshB = await prisma.order.findUniqueOrThrow({ where: { id: orderB.id } });
+    const freshB = orThrow(await db.query.order.findFirst({ where: eq(orderTable.id, orderB.id) }));
     await refundOrder({
       orderId: orderB.id,
       expectedVersion: freshB.version,
@@ -117,11 +159,7 @@ describe("stats:rebuild consistency", () => {
     // 手算（basePrice 135）：day1 = (qty2 + qty3) 付款、qty3 退款
     //             → quantitySold=5 grossAmount=675 refundedQty=3 refundedAmount=405 → net=2 / 270
     //       day2 = qty1 付款 → quantitySold=1 grossAmount=135 net=1 / 135
-    const liveDay1 = await prisma.dailyProductSales.findUniqueOrThrow({
-      where: {
-        storeId_businessDate_productId: { storeId: store.id, businessDate: DAY1_KEY(), productId: product.id },
-      },
-    });
+    const liveDay1 = await getDailyProductSalesRow(store.id, DAY1_KEY(), product.id);
     expect(liveDay1).toMatchObject({
       quantitySold: 5,
       grossAmount: 675,
@@ -131,11 +169,7 @@ describe("stats:rebuild consistency", () => {
       netAmount: 270,
     });
 
-    const liveDay2 = await prisma.dailyProductSales.findUniqueOrThrow({
-      where: {
-        storeId_businessDate_productId: { storeId: store.id, businessDate: DAY2_KEY(), productId: product.id },
-      },
-    });
+    const liveDay2 = await getDailyProductSalesRow(store.id, DAY2_KEY(), product.id);
     expect(liveDay2).toMatchObject({
       quantitySold: 1,
       grossAmount: 135,
@@ -148,16 +182,8 @@ describe("stats:rebuild consistency", () => {
     const rebuildResult = await rebuildDailyProductSales({ from: DAY1, to: DAY2 });
     expect(rebuildResult.ordersConsidered).toBe(3); // A, B, C（D 從未付款，不列入）
 
-    const rebuiltDay1 = await prisma.dailyProductSales.findUniqueOrThrow({
-      where: {
-        storeId_businessDate_productId: { storeId: store.id, businessDate: DAY1_KEY(), productId: product.id },
-      },
-    });
-    const rebuiltDay2 = await prisma.dailyProductSales.findUniqueOrThrow({
-      where: {
-        storeId_businessDate_productId: { storeId: store.id, businessDate: DAY2_KEY(), productId: product.id },
-      },
-    });
+    const rebuiltDay1 = await getDailyProductSalesRow(store.id, DAY1_KEY(), product.id);
+    const rebuiltDay2 = await getDailyProductSalesRow(store.id, DAY2_KEY(), product.id);
 
     expect(rebuiltDay1).toMatchObject({
       quantitySold: liveDay1.quantitySold,

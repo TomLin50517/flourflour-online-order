@@ -1,5 +1,5 @@
 import { AppError, NotFoundError } from "@/lib/errors";
-import { getDb } from "@/lib/db";
+import { getDb } from "@/db/client";
 
 export class UnauthorizedOrderAccessError extends AppError {
   constructor() {
@@ -9,11 +9,11 @@ export class UnauthorizedOrderAccessError extends AppError {
 }
 
 export async function getOrderByNo(orderNo: string, accessToken: string) {
-  const prisma = await getDb();
-  const order = await prisma.order.findUnique({
-    where: { orderNo },
-    include: {
-      items: { include: { options: true } },
+  const db = await getDb();
+  const order = await db.query.order.findFirst({
+    where: (o, { eq }) => eq(o.orderNo, orderNo),
+    with: {
+      items: { with: { options: true } },
     },
   });
 
@@ -34,10 +34,8 @@ export async function getOrderByNo(orderNo: string, accessToken: string) {
     readyAt: order.readyAt,
     expiresAt: order.expiresAt,
     items: order.items.map((item) => {
-      const name = (item.nameSnapshot as Record<string, string>)[order.locale] ?? "";
-      const options = item.options.map(
-        (option) => (option.itemNameSnapshot as Record<string, string>)[order.locale] ?? "",
-      );
+      const name = item.nameSnapshot[order.locale] ?? "";
+      const options = item.options.map((option) => option.itemNameSnapshot[order.locale] ?? "");
       return {
         name,
         quantity: item.quantity,

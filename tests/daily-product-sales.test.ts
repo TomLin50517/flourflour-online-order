@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDb } from "@/lib/db";
+import { and, eq, like } from "drizzle-orm";
+import { orThrow } from "@/db/helpers";
+import { dailyProductSales } from "@/db/schema";
+import { getDb } from "@/db/client";
 
-const prisma = await getDb();
+const db = await getDb();
 import { applyDailyProductSales } from "@/server/stats/daily-product-sales";
 
 // 用完全合成的 storeId/productId（DailyProductSales 對兩者皆無外鍵約束），
@@ -17,15 +20,27 @@ function makeParams(overrides: Partial<{ storeId: string; businessDate: Date; pr
   };
 }
 
+async function getRow(storeId: string, businessDate: Date, productId: string) {
+  return orThrow(
+    await db.query.dailyProductSales.findFirst({
+      where: and(
+        eq(dailyProductSales.storeId, storeId),
+        eq(dailyProductSales.businessDate, businessDate),
+        eq(dailyProductSales.productId, productId),
+      ),
+    }),
+  );
+}
+
 afterEach(async () => {
-  await prisma.dailyProductSales.deleteMany({ where: { storeId: { startsWith: STORE_ID_PREFIX } } });
+  await db.delete(dailyProductSales).where(like(dailyProductSales.storeId, `${STORE_ID_PREFIX}%`));
 });
 
 describe("applyDailyProductSales", () => {
   it("creates a row on the first PAID event", async () => {
     const { storeId, businessDate, productId } = makeParams();
 
-    await prisma.$transaction((tx) =>
+    await db.transaction((tx) =>
       applyDailyProductSales(tx, "PAID", {
         storeId,
         businessDate,
@@ -33,9 +48,7 @@ describe("applyDailyProductSales", () => {
       }),
     );
 
-    const row = await prisma.dailyProductSales.findUniqueOrThrow({
-      where: { storeId_businessDate_productId: { storeId, businessDate, productId } },
-    });
+    const row = await getRow(storeId, businessDate, productId);
     expect(row).toMatchObject({
       productNameZh: "測試可頌",
       quantitySold: 2,
@@ -51,12 +64,10 @@ describe("applyDailyProductSales", () => {
     const { storeId, businessDate, productId } = makeParams();
     const items = [{ productId, quantity: 1, lineTotal: 80, nameSnapshot: { ZH_TW: "測試可頌" } }];
 
-    await prisma.$transaction((tx) => applyDailyProductSales(tx, "PAID", { storeId, businessDate, items }));
-    await prisma.$transaction((tx) => applyDailyProductSales(tx, "PAID", { storeId, businessDate, items }));
+    await db.transaction((tx) => applyDailyProductSales(tx, "PAID", { storeId, businessDate, items }));
+    await db.transaction((tx) => applyDailyProductSales(tx, "PAID", { storeId, businessDate, items }));
 
-    const row = await prisma.dailyProductSales.findUniqueOrThrow({
-      where: { storeId_businessDate_productId: { storeId, businessDate, productId } },
-    });
+    const row = await getRow(storeId, businessDate, productId);
     expect(row.quantitySold).toBe(2);
     expect(row.grossAmount).toBe(160);
     expect(row.netQuantity).toBe(2);
@@ -67,12 +78,10 @@ describe("applyDailyProductSales", () => {
     const { storeId, businessDate, productId } = makeParams();
     const items = [{ productId, quantity: 3, lineTotal: 240, nameSnapshot: { ZH_TW: "測試可頌" } }];
 
-    await prisma.$transaction((tx) => applyDailyProductSales(tx, "PAID", { storeId, businessDate, items }));
-    await prisma.$transaction((tx) => applyDailyProductSales(tx, "REFUNDED", { storeId, businessDate, items }));
+    await db.transaction((tx) => applyDailyProductSales(tx, "PAID", { storeId, businessDate, items }));
+    await db.transaction((tx) => applyDailyProductSales(tx, "REFUNDED", { storeId, businessDate, items }));
 
-    const row = await prisma.dailyProductSales.findUniqueOrThrow({
-      where: { storeId_businessDate_productId: { storeId, businessDate, productId } },
-    });
+    const row = await getRow(storeId, businessDate, productId);
     expect(row.quantitySold).toBe(3);
     expect(row.grossAmount).toBe(240);
     expect(row.refundedQty).toBe(3);
@@ -85,7 +94,7 @@ describe("applyDailyProductSales", () => {
     const shared = makeParams();
     const otherProductId = `M5TEST-PRODUCT-${randomUUID()}`;
 
-    await prisma.$transaction((tx) =>
+    await db.transaction((tx) =>
       applyDailyProductSales(tx, "PAID", {
         storeId: shared.storeId,
         businessDate: shared.businessDate,
@@ -96,24 +105,8 @@ describe("applyDailyProductSales", () => {
       }),
     );
 
-    const rowA = await prisma.dailyProductSales.findUniqueOrThrow({
-      where: {
-        storeId_businessDate_productId: {
-          storeId: shared.storeId,
-          businessDate: shared.businessDate,
-          productId: shared.productId,
-        },
-      },
-    });
-    const rowB = await prisma.dailyProductSales.findUniqueOrThrow({
-      where: {
-        storeId_businessDate_productId: {
-          storeId: shared.storeId,
-          businessDate: shared.businessDate,
-          productId: otherProductId,
-        },
-      },
-    });
+    const rowA = await getRow(shared.storeId, shared.businessDate, shared.productId);
+    const rowB = await getRow(shared.storeId, shared.businessDate, otherProductId);
     expect(rowA.quantitySold).toBe(1);
     expect(rowB.quantitySold).toBe(5);
     expect(rowB.grossAmount).toBe(675);

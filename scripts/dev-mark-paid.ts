@@ -1,5 +1,8 @@
 import "dotenv/config";
-import { getDb } from "../src/lib/db";
+import { eq } from "drizzle-orm";
+import { getDb } from "../src/db/client";
+import { orThrow } from "../src/db/helpers";
+import { order as orderTable } from "../src/db/schema";
 import { assignPickupNumber } from "../src/server/order/pickup-number";
 import { transition } from "../src/server/order/state-machine";
 
@@ -10,11 +13,11 @@ if (!orderNo) {
 }
 
 async function main() {
-  const prisma = await getDb();
-  const store = await prisma.store.findFirstOrThrow();
-  const order = await prisma.order.findUniqueOrThrow({ where: { orderNo } });
+  const db = await getDb();
+  const store = orThrow(await db.query.store.findFirst());
+  const order = orThrow(await db.query.order.findFirst({ where: eq(orderTable.orderNo, orderNo) }));
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const now = new Date();
     const { pickupNumber, businessDate, pickupSeq } = await assignPickupNumber(tx, store, now);
     return transition({

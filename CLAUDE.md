@@ -11,7 +11,9 @@
 
 ## 技術棧
 
-Next.js 15 (App Router) · TypeScript strict · PostgreSQL 16 · Prisma · next-intl · Tailwind + shadcn/ui · Zod · Auth.js v5 · Vitest + Playwright
+Next.js 15 (App Router) · TypeScript strict · PostgreSQL 16 · Drizzle ORM · next-intl · Tailwind + shadcn/ui · Zod · Auth.js v5 · Vitest + Playwright
+
+> ORM 已由 Prisma 遷移至 Drizzle（見 `docs/DRIZZLE-MIGRATION-SPEC.md`）：schema 定義在 `src/db/schema.ts`，連線入口在 `src/db/client.ts`，migration 在 `drizzle/migrations/`。舊 `prisma/migrations/` 僅保留供 git 溯源。
 
 ---
 
@@ -32,9 +34,9 @@ npm run typecheck          # tsc --noEmit
 npm run lint               # ESLint
 npm run test               # Vitest
 npm run test:e2e           # Playwright
-npm run db:migrate         # prisma migrate dev
+npm run db:migrate         # drizzle-kit generate && drizzle-kit migrate
 npm run db:seed            # 種子資料（4 語系 × ≥8 商品）
-npm run db:studio          # Prisma Studio
+npm run db:studio          # Drizzle Studio
 npm run stats:rebuild      # 由訂單明細全量重算 DailyProductSales
 docker compose up -d       # Postgres + MinIO
 ```
@@ -46,7 +48,7 @@ docker compose up -d       # Postgres + MinIO
 ## 分層與依賴方向
 
 ```
-app/           →  server/        →  lib/  →  prisma
+app/           →  server/        →  lib/  →  db
 (HTTP/UI)         (商業邏輯)        (工具)
 ```
 
@@ -66,7 +68,7 @@ app/           →  server/        →  lib/  →  prisma
 
 ### 訂單狀態
 - 只能透過 `server/order/state-machine.ts` 的 `transition()` 變更狀態
-- **禁止**在任何地方寫 `prisma.order.update({ data: { status } })`
+- **禁止**在任何地方直接寫 `db.update(order).set({ status })`
 - 每次轉移都要寫一筆 `OrderEvent`
 - 使用樂觀鎖：`WHERE id = ? AND version = ?`，affectedRows = 0 即拋 `ConflictError`
 
@@ -89,10 +91,10 @@ app/           →  server/        →  lib/  →  prisma
 - 後台 `/admin/*` 固定 zh-TW，不做 i18n
 
 ### 資料庫
-- 每次 schema 變更都要有 migration 檔，禁止 `prisma db push` 到已有 migration 的分支
+- 每次 schema 變更都要有 migration 檔，禁止 `drizzle-kit push` 到已有 migration 的分支
 - 商品採軟刪除（`deletedAt`），查詢一律過濾
-- 涉及多表寫入必用 `prisma.$transaction`
-- 新增查詢時檢查是否需要索引；`SPEC.md` §5.1 已定義的索引不得移除
+- 涉及多表寫入必用 `db.transaction()`（Drizzle 無巢狀寫入，多表寫入需手動依序 `.insert()`/`.update()`，詳見 `docs/DRIZZLE-MIGRATION-SPEC.md` §4）
+- 新增查詢時檢查是否需要索引；`SPEC.md` §5.1 已定義的索引不得移除（欄位語意以 `SPEC.md` 為準，實際型別對照見 `docs/DRIZZLE-MIGRATION-SPEC.md` §3）
 
 ---
 

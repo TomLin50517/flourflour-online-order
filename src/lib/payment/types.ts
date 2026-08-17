@@ -1,4 +1,4 @@
-import type { PaymentStatus } from "@/generated/prisma/enums";
+import type { PaymentStatus } from "@/db/schema";
 import type { Locale } from "@/lib/i18n/locale-map";
 
 // 見 SPEC.md §7.2：金流抽象層介面，凍結上下游契約。

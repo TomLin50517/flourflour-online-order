@@ -1,8 +1,10 @@
 import bcrypt from "bcryptjs";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import { eq } from "drizzle-orm";
 import { getClientIp } from "@/lib/client-ip";
-import { getDb } from "@/lib/db";
+import { getDb } from "@/db/client";
+import { adminUser } from "@/db/schema";
 import { clearLoginFailures, isLockedOut, recordLoginFailure } from "@/lib/login-guard";
 import { checkRateLimit } from "@/lib/rate-limit";
 
@@ -47,8 +49,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // 見 SPEC.md §10.1：失敗 5 次鎖定 15 分鐘（以 IP + email 計數）。
         if (isLockedOut(ip, email)) return null;
 
-        const prisma = await getDb();
-        const user = await prisma.adminUser.findUnique({ where: { email } });
+        const db = await getDb();
+        const user = await db.query.adminUser.findFirst({ where: eq(adminUser.email, email) });
         if (!user || !user.isActive) {
           recordLoginFailure(ip, email);
           return null;
@@ -62,10 +64,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         clearLoginFailures(ip, email);
 
-        await prisma.adminUser.update({
-          where: { id: user.id },
-          data: { lastLoginAt: new Date() },
-        });
+        await db.update(adminUser).set({ lastLoginAt: new Date() }).where(eq(adminUser.id, user.id));
 
         return { id: user.id, email: user.email, name: user.displayName, role: user.role };
       },

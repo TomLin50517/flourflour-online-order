@@ -1,4 +1,7 @@
-import { getDb } from "@/lib/db";
+import { and, desc, eq, gte, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { orThrow } from "@/db/helpers";
+import { dailyProductSales, order } from "@/db/schema";
 import { toBusinessDate } from "@/server/order/business-date";
 
 export type DailyProductSalesRow = {
@@ -24,16 +27,17 @@ export async function getDailyProductSalesReport(params: {
   to: Date;
   productId?: string;
 }): Promise<{ from: Date; to: Date; items: DailyProductSalesRow[] }> {
-  const prisma = await getDb();
-  const store = await prisma.store.findFirstOrThrow();
+  const db = await getDb();
+  const store = orThrow(await db.query.store.findFirst());
 
-  const rows = await prisma.dailyProductSales.findMany({
-    where: {
-      storeId: store.id,
-      businessDate: { gte: params.from, lte: params.to },
-      ...(params.productId ? { productId: params.productId } : {}),
-    },
-    orderBy: { businessDate: "asc" },
+  const rows = await db.query.dailyProductSales.findMany({
+    where: and(
+      eq(dailyProductSales.storeId, store.id),
+      gte(dailyProductSales.businessDate, params.from),
+      lte(dailyProductSales.businessDate, params.to),
+      params.productId ? eq(dailyProductSales.productId, params.productId) : undefined,
+    ),
+    orderBy: [dailyProductSales.businessDate],
   });
 
   const byProduct = new Map<string, DailyProductSalesRow>();
@@ -99,49 +103,70 @@ function resolveRange(
  * （§10.5 頁面需求，與 summary 端點合併回傳，避免前端多一次請求）。
  */
 export async function getStatsSummary(params: { from?: Date; to?: Date }): Promise<StatsSummary> {
-  const prisma = await getDb();
-  const store = await prisma.store.findFirstOrThrow();
+  const db = await getDb();
+  const store = orThrow(await db.query.store.findFirst());
   const { from, to } = resolveRange(params, store);
 
-  const [orderAgg, refundAgg, topProducts, dailyOrders] = await Promise.all([
-    prisma.order.aggregate({
-      where: { storeId: store.id, businessDate: { gte: from, lte: to }, paidAt: { not: null } },
-      _sum: { totalAmount: true },
-      _count: { _all: true },
-    }),
-    prisma.dailyProductSales.aggregate({
-      where: { storeId: store.id, businessDate: { gte: from, lte: to } },
-      _sum: { refundedAmount: true },
-    }),
-    prisma.dailyProductSales.groupBy({
-      by: ["productId"],
-      where: { storeId: store.id, businessDate: { gte: from, lte: to } },
-      _sum: { netQuantity: true, netAmount: true },
-      orderBy: { _sum: { netQuantity: "desc" } },
-      take: 10,
-    }),
+  const paidOrderRange = and(
+    eq(order.storeId, store.id),
+    gte(order.businessDate, from),
+    lte(order.businessDate, to),
+    isNotNull(order.paidAt),
+  );
+  const salesRange = and(
+    eq(dailyProductSales.storeId, store.id),
+    gte(dailyProductSales.businessDate, from),
+    lte(dailyProductSales.businessDate, to),
+  );
+
+  const [orderAggRows, refundAggRows, topProducts, dailyOrders] = await Promise.all([
+    db
+      .select({
+        sum: sql<number>`coalesce(sum(${order.totalAmount}), 0)::int`,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(order)
+      .where(paidOrderRange),
+    db
+      .select({ sum: sql<number>`coalesce(sum(${dailyProductSales.refundedAmount}), 0)::int` })
+      .from(dailyProductSales)
+      .where(salesRange),
+    db
+      .select({
+        productId: dailyProductSales.productId,
+        netQuantity: sql<number>`coalesce(sum(${dailyProductSales.netQuantity}), 0)::int`,
+        netAmount: sql<number>`coalesce(sum(${dailyProductSales.netAmount}), 0)::int`,
+      })
+      .from(dailyProductSales)
+      .where(salesRange)
+      .groupBy(dailyProductSales.productId)
+      .orderBy((t) => desc(t.netQuantity))
+      .limit(10),
     // 見 SPEC.md §10.5：趨勢圖需要「區間內每日」訂單數與營收，與上面 orderAgg
     // 的整段區間彙總是不同的聚合軸，故另外依 businessDate 分組。
-    prisma.order.groupBy({
-      by: ["businessDate"],
-      where: { storeId: store.id, businessDate: { gte: from, lte: to }, paidAt: { not: null } },
-      _sum: { totalAmount: true },
-      _count: { _all: true },
-      orderBy: { businessDate: "asc" },
-    }),
+    db
+      .select({
+        businessDate: order.businessDate,
+        revenue: sql<number>`coalesce(sum(${order.totalAmount}), 0)::int`,
+        orderCount: sql<number>`count(*)::int`,
+      })
+      .from(order)
+      .where(paidOrderRange)
+      .groupBy(order.businessDate)
+      .orderBy(order.businessDate),
   ]);
 
-  const revenue = orderAgg._sum.totalAmount ?? 0;
-  const orderCount = orderAgg._count._all;
+  const revenue = orderAggRows[0]?.sum ?? 0;
+  const orderCount = orderAggRows[0]?.count ?? 0;
   const avgOrderValue = orderCount > 0 ? Math.round(revenue / orderCount) : 0;
-  const refundAmount = refundAgg._sum.refundedAmount ?? 0;
+  const refundAmount = refundAggRows[0]?.sum ?? 0;
 
   const productIds = topProducts.map((p) => p.productId);
   const nameRows = productIds.length
-    ? await prisma.dailyProductSales.findMany({
-        where: { storeId: store.id, productId: { in: productIds }, businessDate: { gte: from, lte: to } },
-        select: { productId: true, productNameZh: true },
-        orderBy: { businessDate: "desc" },
+    ? await db.query.dailyProductSales.findMany({
+        where: and(salesRange, inArray(dailyProductSales.productId, productIds)),
+        columns: { productId: true, productNameZh: true },
+        orderBy: [desc(dailyProductSales.businessDate)],
       })
     : [];
   const nameByProduct = new Map<string, string>();
@@ -159,15 +184,15 @@ export async function getStatsSummary(params: { from?: Date; to?: Date }): Promi
     topProducts: topProducts.map((p) => ({
       productId: p.productId,
       productNameZh: nameByProduct.get(p.productId) ?? "",
-      netQuantity: p._sum.netQuantity ?? 0,
-      netAmount: p._sum.netAmount ?? 0,
+      netQuantity: p.netQuantity,
+      netAmount: p.netAmount,
     })),
     dailyTrend: dailyOrders
       .filter((row): row is typeof row & { businessDate: Date } => row.businessDate !== null)
       .map((row) => ({
         businessDate: row.businessDate,
-        orderCount: row._count._all,
-        revenue: row._sum.totalAmount ?? 0,
+        orderCount: row.orderCount,
+        revenue: row.revenue,
       })),
   };
 }

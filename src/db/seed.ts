@@ -1,11 +1,28 @@
+import "dotenv/config";
 import bcrypt from "bcryptjs";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../src/generated/prisma/client";
-import { LocaleCode } from "../src/generated/prisma/enums";
-import { BCRYPT_COST } from "../src/lib/password";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { eq } from "drizzle-orm";
+import * as schema from "./schema";
+import {
+  adminUser,
+  category as categoryTable,
+  categoryTranslation as categoryTranslationTable,
+  optionGroup as optionGroupTable,
+  optionGroupTranslation as optionGroupTranslationTable,
+  optionItem as optionItemTable,
+  optionItemTranslation as optionItemTranslationTable,
+  product as productTable,
+  productImage as productImageTable,
+  productOptionGroup as productOptionGroupTable,
+  productTranslation as productTranslationTable,
+  store as storeTable,
+  type LocaleCode,
+} from "./schema";
+import { BCRYPT_COST } from "../lib/password";
 
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
-const prisma = new PrismaClient({ adapter });
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const db = drizzle(pool, { schema });
 
 type Translations = Record<LocaleCode, string>;
 
@@ -208,54 +225,64 @@ const optionGroups = [
 ] as const;
 
 async function main() {
-  const store = await prisma.store.upsert({
-    where: { id: "store-main" },
-    update: {},
-    create: {
-      id: "store-main",
-      name: "FlourFlour",
-    },
-  });
+  const [existingStore] = await db.select().from(storeTable).where(eq(storeTable.id, "store-main"));
+  const store =
+    existingStore ??
+    (await db.insert(storeTable).values({ id: "store-main", name: "FlourFlour" }).returning())[0];
 
   // Reset catalog data for idempotent re-seeding; Store itself is preserved.
-  await prisma.product.deleteMany({ where: { storeId: store.id } });
-  await prisma.optionGroup.deleteMany({ where: { storeId: store.id } });
-  await prisma.category.deleteMany({ where: { storeId: store.id } });
+  await db.delete(productTable).where(eq(productTable.storeId, store.id));
+  await db.delete(optionGroupTable).where(eq(optionGroupTable.storeId, store.id));
+  await db.delete(categoryTable).where(eq(categoryTable.storeId, store.id));
 
   const categoryIdBySlug = new Map<string, string>();
   for (const category of categories) {
-    const created = await prisma.category.create({
-      data: {
-        storeId: store.id,
-        slug: category.slug,
-        sortOrder: category.sortOrder,
-        translations: { create: translationRows(category.name) },
-      },
-    });
+    const [created] = await db
+      .insert(categoryTable)
+      .values({ storeId: store.id, slug: category.slug, sortOrder: category.sortOrder })
+      .returning();
+    await db
+      .insert(categoryTranslationTable)
+      .values(translationRows(category.name).map((t) => ({ ...t, categoryId: created.id })));
     categoryIdBySlug.set(category.slug, created.id);
   }
 
   const optionGroupIdByCode = new Map<string, string>();
   for (const group of optionGroups) {
-    const created = await prisma.optionGroup.create({
-      data: {
+    const [created] = await db
+      .insert(optionGroupTable)
+      .values({
         storeId: store.id,
         code: group.code,
         selectType: group.selectType,
         minSelect: group.minSelect,
         maxSelect: group.maxSelect,
-        translations: { create: translationRows(group.name) },
-        items: {
-          create: group.items.map((item) => ({
-            code: item.code,
-            priceDelta: item.priceDelta,
-            isDefault: item.isDefault,
-            sortOrder: item.sortOrder,
-            translations: { create: translationRows(item.name) },
-          })),
-        },
-      },
-    });
+      })
+      .returning();
+    await db
+      .insert(optionGroupTranslationTable)
+      .values(translationRows(group.name).map((t) => ({ ...t, groupId: created.id })));
+
+    const insertedItems = await db
+      .insert(optionItemTable)
+      .values(
+        group.items.map((item) => ({
+          groupId: created.id,
+          code: item.code,
+          priceDelta: item.priceDelta,
+          isDefault: item.isDefault,
+          sortOrder: item.sortOrder,
+        })),
+      )
+      .returning();
+    // 見 docs/DRIZZLE-MIGRATION-SPEC.md §4.2：批次 insert 的 RETURNING 順序跟傳入
+    // 順序一致，用 index 對應回 group.items 找出每個規格項目對應的翻譯。
+    const itemTranslations = insertedItems.flatMap((itemRow, index) =>
+      translationRows(group.items[index].name).map((t) => ({ ...t, itemId: itemRow.id })),
+    );
+    if (itemTranslations.length > 0) {
+      await db.insert(optionItemTranslationTable).values(itemTranslations);
+    }
     optionGroupIdByCode.set(group.code, created.id);
   }
 
@@ -263,45 +290,48 @@ async function main() {
     const categoryId = categoryIdBySlug.get(product.category);
     if (!categoryId) throw new Error(`Unknown category: ${product.category}`);
 
-    await prisma.product.create({
-      data: {
+    const [createdProduct] = await db
+      .insert(productTable)
+      .values({
         storeId: store.id,
         categoryId,
         slug: product.slug,
         basePrice: product.basePrice,
         sortOrder: index,
-        translations: {
-          create: Object.entries(product.name).map(([locale, name]) => ({
-            locale: locale as LocaleCode,
-            name,
-            description: product.description[locale as LocaleCode],
-          })),
-        },
-        images: {
-          create: [
-            {
-              url: `/images/products/${product.image.file}`,
-              width: product.image.width,
-              height: product.image.height,
-              isPrimary: true,
-              altText: product.name.ZH_TW,
-            },
-          ],
-        },
-        optionGroups: {
-          create: product.optionGroups.map((code, groupSortOrder) => {
-            const groupId = optionGroupIdByCode.get(code);
-            if (!groupId) throw new Error(`Unknown option group: ${code}`);
-            const group = optionGroups.find((g) => g.code === code)!;
-            return {
-              groupId,
-              sortOrder: groupSortOrder,
-              isRequired: group.minSelect > 0,
-            };
-          }),
-        },
-      },
+      })
+      .returning();
+
+    await db.insert(productTranslationTable).values(
+      Object.entries(product.name).map(([locale, name]) => ({
+        productId: createdProduct.id,
+        locale: locale as LocaleCode,
+        name,
+        description: product.description[locale as LocaleCode],
+      })),
+    );
+
+    await db.insert(productImageTable).values({
+      productId: createdProduct.id,
+      url: `/images/products/${product.image.file}`,
+      width: product.image.width,
+      height: product.image.height,
+      isPrimary: true,
+      altText: product.name.ZH_TW,
     });
+
+    await db.insert(productOptionGroupTable).values(
+      product.optionGroups.map((code, groupSortOrder) => {
+        const groupId = optionGroupIdByCode.get(code);
+        if (!groupId) throw new Error(`Unknown option group: ${code}`);
+        const group = optionGroups.find((g) => g.code === code)!;
+        return {
+          productId: createdProduct.id,
+          groupId,
+          sortOrder: groupSortOrder,
+          isRequired: group.minSelect > 0,
+        };
+      }),
+    );
   }
 
   console.log(`Seeded store "${store.name}" with ${categories.length} categories, ${optionGroups.length} option groups, ${products.length} products.`);
@@ -309,16 +339,10 @@ async function main() {
   const adminEmail = process.env.ADMIN_SEED_EMAIL ?? "admin@flourflour.test";
   const adminPassword = process.env.ADMIN_SEED_PASSWORD ?? "admin1234";
   const passwordHash = await bcrypt.hash(adminPassword, BCRYPT_COST);
-  await prisma.adminUser.upsert({
-    where: { email: adminEmail },
-    update: { passwordHash },
-    create: {
-      email: adminEmail,
-      passwordHash,
-      displayName: "Admin",
-      role: "ADMIN",
-    },
-  });
+  await db
+    .insert(adminUser)
+    .values({ email: adminEmail, passwordHash, displayName: "Admin", role: "ADMIN" })
+    .onConflictDoUpdate({ target: adminUser.email, set: { passwordHash } });
   console.log(`Seeded admin user "${adminEmail}" (dev password: "${adminPassword}", change before real use).`);
 }
 
@@ -328,5 +352,5 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await pool.end();
   });

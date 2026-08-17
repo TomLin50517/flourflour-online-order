@@ -1,5 +1,5 @@
 import type { DefaultSession } from "@auth/core/types";
-import type { AdminRole } from "@/generated/prisma/enums";
+import type { AdminRole } from "@/db/schema";
 
 declare module "@auth/core/types" {
   interface User {

@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import "../globals.css";
+import "../../globals.css";
 
 export const metadata: Metadata = {
-  title: "開發工具",
+  title: "後台管理",
 };
 
-export default function DevRootLayout(props: LayoutProps<"/dev">) {
+export default function AdminRootLayout(props: LayoutProps<"/admin">) {
   return (
     <html lang="zh-TW">
       <body>{props.children}</body>

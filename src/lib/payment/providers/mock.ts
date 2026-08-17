@@ -1,6 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { PaymentStatus } from "@/generated/prisma/enums";
-import { getDb } from "@/lib/db";
+import { and, eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { payment as paymentTable, type PaymentStatus } from "@/db/schema";
 import type {
   CreateChargeInput,
   CreateChargeResult,
@@ -76,10 +77,12 @@ export class MockProvider implements PaymentProvider {
 
   async queryCharge(providerRef: string): Promise<{ status: PaymentStatus; amount: number; paidAt?: Date }> {
     // Mock 無外部伺服器可查，改以自家 Payment 表模擬「向廠商查詢」的結果。
-    const prisma = await getDb();
-    const payment = await prisma.payment.findFirst({ where: { provider: "mock", providerRef } });
+    const db = await getDb();
+    const payment = await db.query.payment.findFirst({
+      where: and(eq(paymentTable.provider, "mock"), eq(paymentTable.providerRef, providerRef)),
+    });
     if (!payment) {
-      return { status: PaymentStatus.PENDING, amount: 0 };
+      return { status: "PENDING", amount: 0 };
     }
     return { status: payment.status, amount: payment.amount, paidAt: payment.paidAt ?? undefined };
   }

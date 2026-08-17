@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDb } from "@/lib/db";
+import { like } from "drizzle-orm";
+import { pickupCounter } from "@/db/schema";
+import { getDb } from "@/db/client";
 
-const prisma = await getDb();
+const db = await getDb();
 import { assignPickupNumber, type PickupStoreConfig } from "@/server/order/pickup-number";
 
 function makeStore(overrides: Partial<PickupStoreConfig> = {}): PickupStoreConfig {
@@ -18,7 +20,7 @@ function makeStore(overrides: Partial<PickupStoreConfig> = {}): PickupStoreConfi
 }
 
 afterEach(async () => {
-  await prisma.pickupCounter.deleteMany({ where: { storeId: { startsWith: "test-store-" } } });
+  await db.delete(pickupCounter).where(like(pickupCounter.storeId, "test-store-%"));
 });
 
 describe("assignPickupNumber", () => {
@@ -27,7 +29,7 @@ describe("assignPickupNumber", () => {
     const at = new Date("2026-08-15T02:00:00Z");
 
     const results = await Promise.all(
-      Array.from({ length: 200 }, () => prisma.$transaction((tx) => assignPickupNumber(tx, store, at))),
+      Array.from({ length: 200 }, () => db.transaction((tx) => assignPickupNumber(tx, store, at))),
     );
 
     const seqs = results.map((r) => r.pickupSeq).sort((a, b) => a - b);
@@ -41,10 +43,10 @@ describe("assignPickupNumber", () => {
   it("resets the sequence when the business date changes", async () => {
     const store = makeStore();
 
-    const day1 = await prisma.$transaction((tx) =>
+    const day1 = await db.transaction((tx) =>
       assignPickupNumber(tx, store, new Date("2026-08-15T02:00:00Z")),
     );
-    const day2 = await prisma.$transaction((tx) =>
+    const day2 = await db.transaction((tx) =>
       assignPickupNumber(tx, store, new Date("2026-08-16T02:00:00Z")),
     );
 
@@ -57,9 +59,9 @@ describe("assignPickupNumber", () => {
     const store = makeStore({ pickupMax: 2, pickupPadding: 2 });
     const at = new Date("2026-08-15T02:00:00Z");
 
-    const first = await prisma.$transaction((tx) => assignPickupNumber(tx, store, at));
-    const second = await prisma.$transaction((tx) => assignPickupNumber(tx, store, at));
-    const third = await prisma.$transaction((tx) => assignPickupNumber(tx, store, at));
+    const first = await db.transaction((tx) => assignPickupNumber(tx, store, at));
+    const second = await db.transaction((tx) => assignPickupNumber(tx, store, at));
+    const third = await db.transaction((tx) => assignPickupNumber(tx, store, at));
 
     expect(first.pickupNumber).toBe("A01");
     expect(second.pickupNumber).toBe("A02");

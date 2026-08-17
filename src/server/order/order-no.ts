@@ -1,4 +1,4 @@
-import type { Prisma } from "@/generated/prisma/client";
+import type { Tx } from "@/db/client";
 import { formatBusinessDateCompact, toBusinessDate } from "./business-date";
 import { nextSeq } from "./counter";
 
@@ -13,7 +13,7 @@ export type OrderNoStoreConfig = {
  * 與取貨單號各自計數（獨立的 OrderNoCounter）。超過 9999 自然擴展為 5 碼。
  */
 export async function assignOrderNo(
-  tx: Prisma.TransactionClient,
+  tx: Tx,
   store: OrderNoStoreConfig,
   at: Date,
 ) {

@@ -1,4 +1,11 @@
-import { getDb } from "@/lib/db";
+import { and, eq, lt } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { orThrow } from "@/db/helpers";
+import {
+  order as orderTable,
+  orderItem as orderItemTable,
+  payment as paymentTable,
+} from "@/db/schema";
 import { logger } from "@/lib/logger";
 import { getPaymentProvider } from "@/lib/payment/registry";
 import type { ProviderCode } from "@/lib/payment/types";
@@ -14,11 +21,11 @@ const RECONCILE_AFTER_MINUTES = 3;
  * 「更新 Payment → 配發 pickupNumber → transition 到 PAID」邏輯。
  */
 export async function reconcilePendingPayments(now: Date = new Date()) {
-  const prisma = await getDb();
+  const db = await getDb();
   const threshold = new Date(now.getTime() - RECONCILE_AFTER_MINUTES * 60 * 1000);
-  const candidates = await prisma.order.findMany({
-    where: { status: "PENDING_PAYMENT", placedAt: { lt: threshold } },
-    include: { payments: { orderBy: { createdAt: "desc" }, take: 1 } },
+  const candidates = await db.query.order.findMany({
+    where: and(eq(orderTable.status, "PENDING_PAYMENT"), lt(orderTable.placedAt, threshold)),
+    with: { payments: { orderBy: (p, { desc }) => desc(p.createdAt), limit: 1 } },
   });
 
   let checked = 0;
@@ -47,13 +54,13 @@ export async function reconcilePendingPayments(now: Date = new Date()) {
 
     const paidAt = queried.paidAt ?? now;
 
-    await prisma.$transaction(async (tx) => {
-      const freshOrder = await tx.order.findUniqueOrThrow({ where: { id: order.id } });
+    await db.transaction(async (tx) => {
+      const freshOrder = orThrow(await tx.query.order.findFirst({ where: eq(orderTable.id, order.id) }));
       if (freshOrder.status !== "PENDING_PAYMENT") return; // 已被 webhook 搶先處理
 
-      await tx.payment.update({ where: { id: payment.id }, data: { status: "SUCCEEDED", paidAt } });
+      await tx.update(paymentTable).set({ status: "SUCCEEDED", paidAt }).where(eq(paymentTable.id, payment.id));
 
-      const store = await tx.store.findFirstOrThrow();
+      const store = orThrow(await tx.query.store.findFirst());
       const { pickupNumber, businessDate, pickupSeq } = await assignPickupNumber(tx, store, paidAt);
 
       await transition({
@@ -67,7 +74,7 @@ export async function reconcilePendingPayments(now: Date = new Date()) {
       });
 
       // 見 SPEC.md §11：於 → PAID 的同一交易內累加 DailyProductSales。
-      const items = await tx.orderItem.findMany({ where: { orderId: order.id } });
+      const items = await tx.query.orderItem.findMany({ where: eq(orderItemTable.orderId, order.id) });
       await applyDailyProductSales(tx, "PAID", { storeId: store.id, businessDate, items });
     });
     reconciled += 1;

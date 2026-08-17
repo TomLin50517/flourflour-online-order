@@ -1,8 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { getDb } from "@/lib/db";
+import { eq, inArray, sql } from "drizzle-orm";
+import { orThrow } from "@/db/helpers";
+import {
+  order as orderTable,
+  orderItem as orderItemTable,
+  orderItemOption as orderItemOptionTable,
+  product as productTable,
+} from "@/db/schema";
+import { getDb } from "@/db/client";
 
-const prisma = await getDb();
+const db = await getDb();
 import {
   InvalidOptionSelectionError,
   ProductUnavailableError,
@@ -11,20 +19,31 @@ import {
 import type { CreateOrderInput } from "@/schemas/order";
 
 afterAll(async () => {
-  const orders = await prisma.order.findMany({ where: { customerNote: "TEST_ORDER" } });
+  const orders = await db.query.order.findMany({ where: eq(orderTable.customerNote, "TEST_ORDER") });
   const orderIds = orders.map((o) => o.id);
-  await prisma.orderItemOption.deleteMany({ where: { orderItem: { orderId: { in: orderIds } } } });
-  await prisma.orderItem.deleteMany({ where: { orderId: { in: orderIds } } });
-  await prisma.order.deleteMany({ where: { id: { in: orderIds } } });
+  if (orderIds.length > 0) {
+    const items = await db.query.orderItem.findMany({
+      where: inArray(orderItemTable.orderId, orderIds),
+      columns: { id: true },
+    });
+    const itemIds = items.map((i) => i.id);
+    if (itemIds.length > 0) {
+      await db.delete(orderItemOptionTable).where(inArray(orderItemOptionTable.orderItemId, itemIds));
+    }
+    await db.delete(orderItemTable).where(inArray(orderItemTable.orderId, orderIds));
+    await db.delete(orderTable).where(inArray(orderTable.id, orderIds));
+  }
 });
 
 async function getSeededProduct(slug: string) {
-  return prisma.product.findFirstOrThrow({
-    where: { slug },
-    include: {
-      optionGroups: { include: { group: { include: { items: true } } } },
-    },
-  });
+  return orThrow(
+    await db.query.product.findFirst({
+      where: eq(productTable.slug, slug),
+      with: {
+        optionGroups: { with: { group: { with: { items: true } } } },
+      },
+    }),
+  );
 }
 
 describe("createOrder", () => {
@@ -88,13 +107,16 @@ describe("createOrder", () => {
     expect(second.isNew).toBe(false);
     expect(second.order.orderNo).toBe(first.order.orderNo);
 
-    const count = await prisma.order.count({ where: { idempotencyKey: key } });
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(orderTable)
+      .where(eq(orderTable.idempotencyKey, key));
     expect(count).toBe(1);
   });
 
   it("rejects a sold-out product with ProductUnavailableError", async () => {
     const product = await getSeededProduct("plain-croissant");
-    await prisma.product.update({ where: { id: product.id }, data: { isSoldOut: true } });
+    await db.update(productTable).set({ isSoldOut: true }).where(eq(productTable.id, product.id));
 
     try {
       const input: CreateOrderInput = {
@@ -104,7 +126,7 @@ describe("createOrder", () => {
       };
       await expect(createOrder(input, randomUUID())).rejects.toThrow(ProductUnavailableError);
     } finally {
-      await prisma.product.update({ where: { id: product.id }, data: { isSoldOut: false } });
+      await db.update(productTable).set({ isSoldOut: false }).where(eq(productTable.id, product.id));
     }
   });
 

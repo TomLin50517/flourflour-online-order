@@ -39,16 +39,16 @@ const CSP = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
-  // 見 docs/OPEN-QUESTIONS.md：`pg`（Prisma 走 Hyperdrive 用的底層驅動）內部依賴
-  // `pg-cloudflare`，這個套件用 conditional exports 依 runtime（`workerd` vs
-  // `default`）切換實作。Next.js 打包 server 端程式碼時預設用 Node.js
-  // condition 去追蹤依賴檔案，只會複製到 `default` 分支對應的檔案，導致
-  // `opennextjs-cloudflare build` 階段找不到 `workerd` 分支需要的檔案而炸掉
-  // （`Could not resolve "pg-cloudflare"`）。這是 OpenNext 官方文件記載的已知
-  // 問題（見 troubleshooting → workerd-specific packages howto），解法是把這些
-  // 套件標成 external，不讓 Next.js 嘗試打包／追蹤它們的內部依賴，交給 runtime
-  // 自己正確解析 conditional exports。
-  serverExternalPackages: ["pg", "pg-cloudflare", "@prisma/client", ".prisma/client"],
+  // 見 docs/OPEN-QUESTIONS.md：`pg`（Drizzle 走 Hyperdrive 用的底層驅動，見
+  // src/db/client.ts 的 drizzle-orm/node-postgres）內部依賴 `pg-cloudflare`，
+  // 這個套件用 conditional exports 依 runtime（`workerd` vs `default`）切換實作。
+  // Next.js 打包 server 端程式碼時預設用 Node.js condition 去追蹤依賴檔案，只會
+  // 複製到 `default` 分支對應的檔案，導致 `opennextjs-cloudflare build` 階段找不到
+  // `workerd` 分支需要的檔案而炸掉（`Could not resolve "pg-cloudflare"`）。這是
+  // OpenNext 官方文件記載的已知問題（見 troubleshooting → workerd-specific
+  // packages howto），解法是把這些套件標成 external，不讓 Next.js 嘗試打包／
+  // 追蹤它們的內部依賴，交給 runtime 自己正確解析 conditional exports。
+  serverExternalPackages: ["pg", "pg-cloudflare"],
   async headers() {
     return [
       {

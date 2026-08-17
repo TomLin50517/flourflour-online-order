@@ -1,4 +1,4 @@
-import type { LocaleCode } from "@/generated/prisma/enums";
+import type { LocaleCode } from "@/db/schema";
 
 /** 依 SPEC.md §4.3：商品內容缺譯時 fallback 至 zh-TW */
 export function pickTranslation<T extends { locale: LocaleCode }>(

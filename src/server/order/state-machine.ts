@@ -1,5 +1,7 @@
-import type { Prisma } from "@/generated/prisma/client";
-import { OrderStatus } from "@/generated/prisma/enums";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import type { Tx } from "@/db/client";
+import { orThrow } from "@/db/helpers";
+import { order, orderEvent, type OrderStatus } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 
 // 見 SPEC.md §6.2 轉移表
@@ -12,15 +14,15 @@ type TransitionRule = {
 };
 
 const TRANSITIONS: TransitionRule[] = [
-  { from: OrderStatus.PENDING_PAYMENT, to: OrderStatus.PAID, actorTypes: ["PAYMENT_WEBHOOK"] },
-  { from: OrderStatus.PENDING_PAYMENT, to: OrderStatus.CANCELLED, actorTypes: ["SYSTEM", "STAFF"] },
-  { from: OrderStatus.PAID, to: OrderStatus.PREPARING, actorTypes: ["STAFF"] },
-  { from: OrderStatus.PREPARING, to: OrderStatus.READY, actorTypes: ["STAFF"] },
-  { from: OrderStatus.READY, to: OrderStatus.COMPLETED, actorTypes: ["STAFF"] },
-  { from: OrderStatus.PAID, to: OrderStatus.REFUNDED, actorTypes: ["ADMIN"] },
-  { from: OrderStatus.PREPARING, to: OrderStatus.REFUNDED, actorTypes: ["ADMIN"] },
-  { from: OrderStatus.READY, to: OrderStatus.REFUNDED, actorTypes: ["ADMIN"] },
-  { from: OrderStatus.COMPLETED, to: OrderStatus.REFUNDED, actorTypes: ["ADMIN"] },
+  { from: "PENDING_PAYMENT", to: "PAID", actorTypes: ["PAYMENT_WEBHOOK"] },
+  { from: "PENDING_PAYMENT", to: "CANCELLED", actorTypes: ["SYSTEM", "STAFF"] },
+  { from: "PAID", to: "PREPARING", actorTypes: ["STAFF"] },
+  { from: "PREPARING", to: "READY", actorTypes: ["STAFF"] },
+  { from: "READY", to: "COMPLETED", actorTypes: ["STAFF"] },
+  { from: "PAID", to: "REFUNDED", actorTypes: ["ADMIN"] },
+  { from: "PREPARING", to: "REFUNDED", actorTypes: ["ADMIN"] },
+  { from: "READY", to: "REFUNDED", actorTypes: ["ADMIN"] },
+  { from: "COMPLETED", to: "REFUNDED", actorTypes: ["ADMIN"] },
 ];
 
 export class ConflictError extends AppError {
@@ -48,7 +50,7 @@ export function isValidTransition(from: OrderStatus, to: OrderStatus, actorType:
 }
 
 export type TransitionInput = {
-  tx: Prisma.TransactionClient;
+  tx: Tx;
   orderId: string;
   expectedVersion: number;
   toStatus: OrderStatus;
@@ -56,17 +58,17 @@ export type TransitionInput = {
   actorId?: string;
   note?: string;
   /** 額外要在同一交易內寫入的欄位（例如 paidAt、pickupNumber、readyAt…） */
-  extraData?: Record<string, unknown>;
+  extraData?: Partial<typeof order.$inferInsert>;
 };
 
 /**
  * 唯一允許變更 Order.status 的入口。見 CLAUDE.md 硬性規則：
- * 禁止在其他地方直接 `prisma.order.update({ data: { status } })`。
+ * 禁止在其他地方直接改 order 的 status 欄位。
  *
  * 併發安全的關鍵：合法的「from 狀態集合」只由靜態規則表（toStatus + actorType）決定，
  * 不是由一次獨立的讀取決定——否則兩個併發呼叫中，較晚讀到「已被對方改過的狀態」那個
  * 呼叫會誤判成 InvalidStateTransitionError，而不是 SPEC 要求的 ConflictError。
- * 真正的判斷交給 `updateMany` 的 WHERE（version + status IN validFrom）一次搞定，
+ * 真正的判斷交給 UPDATE 的 WHERE（version + status IN validFrom）一次搞定，
  * 失敗後才需要分辨「版本不對（Conflict）」還是「狀態本來就不合法（Invalid）」。
  */
 export async function transition(input: TransitionInput) {
@@ -76,7 +78,7 @@ export async function transition(input: TransitionInput) {
     (rule) => rule.to === toStatus && rule.actorTypes.includes(actorType),
   ).map((rule) => rule.from);
 
-  const before = await tx.order.findUnique({ where: { id: orderId } });
+  const before = await tx.query.order.findFirst({ where: eq(order.id, orderId) });
   if (!before) {
     throw new AppError("NOT_FOUND", "訂單不存在");
   }
@@ -85,29 +87,34 @@ export async function transition(input: TransitionInput) {
     throw new InvalidStateTransitionError(before.status, toStatus);
   }
 
-  const updateResult = await tx.order.updateMany({
-    where: { id: orderId, version: expectedVersion, status: { in: validFromStatuses } },
-    data: { status: toStatus, version: { increment: 1 }, ...extraData },
-  });
+  const updateResult = await tx
+    .update(order)
+    .set({ status: toStatus, version: sql`${order.version} + 1`, ...extraData })
+    .where(
+      and(
+        eq(order.id, orderId),
+        eq(order.version, expectedVersion),
+        inArray(order.status, validFromStatuses),
+      ),
+    )
+    .returning({ id: order.id });
 
-  if (updateResult.count === 0) {
-    const after = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
+  if (updateResult.length === 0) {
+    const after = orThrow(await tx.query.order.findFirst({ where: eq(order.id, orderId) }));
     if (after.version !== expectedVersion) {
       throw new ConflictError();
     }
     throw new InvalidStateTransitionError(after.status, toStatus);
   }
 
-  await tx.orderEvent.create({
-    data: {
-      orderId,
-      fromStatus: before.status,
-      toStatus,
-      actorType,
-      actorId,
-      note,
-    },
+  await tx.insert(orderEvent).values({
+    orderId,
+    fromStatus: before.status,
+    toStatus,
+    actorType,
+    actorId,
+    note,
   });
 
-  return tx.order.findUniqueOrThrow({ where: { id: orderId } });
+  return orThrow(await tx.query.order.findFirst({ where: eq(order.id, orderId) }));
 }
