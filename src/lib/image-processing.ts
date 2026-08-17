@@ -1,16 +1,24 @@
-import { PhotonImage, SamplingFilter, fliph, flipv, resize } from "@cf-wasm/photon/node";
+import type { PhotonImage as PhotonImageType } from "@cf-wasm/photon";
 
-// 見 docs/OPEN-QUESTIONS.md：正式站 /api/v1/admin/uploads 500（CompileError:
-// Wasm code generation disallowed by embedder）——原因是這裡固定走 /node
-// 進入點（執行期動態編譯 wasm，Cloudflare Workers 禁止）。已實測 /workerd
-// 進入點（靜態 wasm binding，Workers 允許）在建置階段就會炸：Next.js 的
-// Turbopack 與 webpack（含 asyncWebAssembly 實驗選項）在解析
-// `dist/workerd.js` 的 `import wasmModule from "*.wasm"` 時都失敗，即使把
-// @cf-wasm/photon 標成 serverExternalPackages 仍會在 tracing 階段炸——
-// 這是 Next.js bundler 對這種 wasm-bindgen 產生的靜態 import 語法的已知
-// 相容性落差（跟 Prisma 7 wasm query compiler 那次是同一類上游問題）。
-// 暫時維持 /node（本機開發/測試不受影響），正式站的圖片上傳功能待進一步
-// 處理（見 docs/OPEN-QUESTIONS.md 的完整記錄與待選方案）。
+// 見 docs/OPEN-QUESTIONS.md：@cf-wasm/photon 的 /workerd 進入點在 Next.js
+// 的 bundler（Turbopack／webpack）下建置期一律失敗（wasm-bindgen 產生的
+// `import x from "*.wasm"` 寫法，兩種 bundler 都無法解析），無法在
+// Cloudflare Workers 上使用。正式站改走 Cloudflare 原生的 Images binding
+// （`env.IMAGES`，見 wrangler.jsonc）——不經過任何 npm 套件或 wasm 打包，
+// 完全繞開這個問題。本機 Node.js 開發／測試沒有這個 binding，維持用
+// @cf-wasm/photon 的 /node 進入點（執行期動態編譯 wasm，Node.js 環境本來
+// 就沒問題）。
+//
+// 重要：`/node` 進入點的原始碼在「模組頂層」（import 當下，不是呼叫函式時）
+// 就執行 `new WebAssembly.Module(...)`（見該檔案 `dist/node.js` 原始碼），
+// 所以就算只在判斷「不是 Cloudflare Workers」時才呼叫用到它的函式，只要這行
+// import 出現在檔案最上層、且這支檔案在 Workers 上被載入，Worker 啟動載入
+// 這個模組的當下就會直接拋 CompileError（實測重現）。必須改成動態
+// `import()`，包在只有本機路徑會執行到的函式裡，讓 bundler 把它拆成獨立、
+// 真正延遲載入的 chunk，Cloudflare Workers 執行期才不會被迫載入它。
+function isCloudflareWorkersRuntime(): boolean {
+  return typeof navigator !== "undefined" && navigator.userAgent === "Cloudflare-Workers";
+}
 
 export type DetectedImageType = "image/jpeg" | "image/png" | "image/webp";
 
@@ -132,7 +140,7 @@ function rotate90Cw(pixels: Uint8Array, width: number, height: number): { pixels
   return { pixels: out, width: newWidth, height: newHeight };
 }
 
-function rotateImage(image: PhotonImage, quarterTurnsCw: 1 | 2 | 3): PhotonImage {
+function rotateImage(photon: PhotonModule, image: PhotonImageType, quarterTurnsCw: 1 | 2 | 3): PhotonImageType {
   let pixels = image.get_raw_pixels();
   let width = image.get_width();
   let height = image.get_height();
@@ -142,7 +150,7 @@ function rotateImage(image: PhotonImage, quarterTurnsCw: 1 | 2 | 3): PhotonImage
     width = step.width;
     height = step.height;
   }
-  return new PhotonImage(pixels, width, height);
+  return new photon.PhotonImage(pixels, width, height);
 }
 
 /**
@@ -150,38 +158,38 @@ function rotateImage(image: PhotonImage, quarterTurnsCw: 1 | 2 | 3): PhotonImage
  * 對照表（與 libvips/sharp `.rotate()` 相同的標準定義）：
  * 2=水平翻轉 3=180° 4=垂直翻轉 5=順轉90°+水平翻轉 6=順轉90° 7=順轉270°+水平翻轉 8=順轉270°。
  */
-function applyExifOrientation(image: PhotonImage, orientation: number): PhotonImage {
+function applyExifOrientation(photon: PhotonModule, image: PhotonImageType, orientation: number): PhotonImageType {
   switch (orientation) {
     case 2:
-      fliph(image);
+      photon.fliph(image);
       return image;
     case 3: {
-      const out = rotateImage(image, 2);
+      const out = rotateImage(photon, image, 2);
       image.free();
       return out;
     }
     case 4:
-      flipv(image);
+      photon.flipv(image);
       return image;
     case 5: {
-      const out = rotateImage(image, 1);
-      fliph(out);
+      const out = rotateImage(photon, image, 1);
+      photon.fliph(out);
       image.free();
       return out;
     }
     case 6: {
-      const out = rotateImage(image, 1);
+      const out = rotateImage(photon, image, 1);
       image.free();
       return out;
     }
     case 7: {
-      const out = rotateImage(image, 3);
-      fliph(out);
+      const out = rotateImage(photon, image, 3);
+      photon.fliph(out);
       image.free();
       return out;
     }
     case 8: {
-      const out = rotateImage(image, 3);
+      const out = rotateImage(photon, image, 3);
       image.free();
       return out;
     }
@@ -200,22 +208,25 @@ function computeFitDimensions(width: number, height: number, maxEdge: number): {
 
 /**
  * 見 SPEC.md §12.1「圖片重新編碼為 webp 去除 EXIF」、§12.2「原圖上傳後轉 webp，最大邊 1200px」。
- * 見 docs/OPEN-QUESTIONS.md：改用 @cf-wasm/photon（Workers 相容的 WASM 函式庫）取代 sharp
- * （原生 binding，Workers runtime 不支援）。photon 的 `get_bytes_webp()` 只支援無損 webp，
+ * 本機 Node.js 開發／測試用的路徑，@cf-wasm/photon 的 `get_bytes_webp()` 只支援無損 webp，
  * 沒有像 sharp 那樣的有損品質參數，輸出檔案會比先前的 quality:82 版本大，這是已知取捨。
  * 重新編碼本身（從像素資料重建 webp）就不會保留原始 EXIF，故不需要另外呼叫去除metadata 的步驟。
  */
-export async function reencodeToWebp(
+type PhotonModule = typeof import("@cf-wasm/photon/node");
+
+async function reencodeToWebpViaPhoton(
   buffer: Buffer,
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
+  const photon = await import("@cf-wasm/photon/node");
+
   const detectedType = detectImageType(buffer);
   const orientation = detectedType === "image/jpeg" ? readJpegExifOrientation(buffer) : 1;
 
-  const decoded = PhotonImage.new_from_byteslice(new Uint8Array(buffer));
-  const oriented = applyExifOrientation(decoded, orientation);
+  const decoded = photon.PhotonImage.new_from_byteslice(new Uint8Array(buffer));
+  const oriented = applyExifOrientation(photon, decoded, orientation);
 
   const target = computeFitDimensions(oriented.get_width(), oriented.get_height(), MAX_EDGE_PX);
-  const resized = resize(oriented, target.width, target.height, SamplingFilter.Lanczos3);
+  const resized = photon.resize(oriented, target.width, target.height, photon.SamplingFilter.Lanczos3);
   oriented.free();
 
   const result = {
@@ -226,4 +237,92 @@ export async function reencodeToWebp(
   resized.free();
 
   return result;
+}
+
+// 見 CLAUDE.md「不得已時用 unknown + type guard，並註明理由」：`cloudflare-env.d.ts`
+// 是用 `wrangler types --include-runtime=false` 產生（見 next.config.ts 的說明，
+// 刻意不含完整 Workers runtime 全域型別，避免跟 Node.js 的 Buffer／fetch 等全域型別
+// 衝突），故 `ImagesBinding` 只是個沒有實際定義、被 tsconfig 的 skipLibCheck 放行的
+// 型別佔位符。這裡改成在本檔案內自行宣告用得到的最小介面，語意依 Cloudflare 官方
+// Images binding 文件（`env.IMAGES.input().transform().output()`），並在存取
+// `getCloudflareContext().env.IMAGES` 時明確轉型進來，取代隱性的 any。
+interface ImageTransformer {
+  transform(transform: {
+    width?: number;
+    height?: number;
+    fit?: "scale-down" | "contain" | "pad" | "squeeze" | "cover" | "crop";
+    rotate?: 0 | 90 | 180 | 270;
+    flip?: "h" | "v" | "hv";
+  }): ImageTransformer;
+  output(options: { format: "image/webp" }): Promise<{ image(): ReadableStream<Uint8Array> }>;
+}
+interface ImagesBindingShape {
+  input(stream: ReadableStream<Uint8Array>): ImageTransformer;
+  info(
+    stream: ReadableStream<Uint8Array>,
+  ): Promise<{ format: "image/svg+xml" } | { format: string; fileSize: number; width: number; height: number }>;
+}
+
+/**
+ * 依 EXIF Orientation 值，把對應的 rotate／flip 轉換依序疊加到 Cloudflare Images
+ * binding 的 transform pipeline 上。對照表與 applyExifOrientation()（photon 版）
+ * 完全一致：2=水平翻轉 3=180° 4=垂直翻轉 5=順轉90°+水平翻轉 6=順轉90°
+ * 7=順轉270°+水平翻轉 8=順轉270°。
+ */
+function applyExifOrientationTransform(transformer: ImageTransformer, orientation: number): ImageTransformer {
+  switch (orientation) {
+    case 2:
+      return transformer.transform({ flip: "h" });
+    case 3:
+      return transformer.transform({ rotate: 180 });
+    case 4:
+      return transformer.transform({ flip: "v" });
+    case 5:
+      return transformer.transform({ rotate: 90 }).transform({ flip: "h" });
+    case 6:
+      return transformer.transform({ rotate: 90 });
+    case 7:
+      return transformer.transform({ rotate: 270 }).transform({ flip: "h" });
+    case 8:
+      return transformer.transform({ rotate: 270 });
+    default:
+      return transformer;
+  }
+}
+
+/**
+ * 見 SPEC.md §12.1「圖片重新編碼為 webp 去除 EXIF」、§12.2「原圖上傳後轉 webp，最大邊 1200px」。
+ * 正式站（Cloudflare Workers）用的路徑，走原生 Images binding，不經過任何 npm wasm 套件。
+ * `fit: "scale-down"` 對應 SPEC 的「最長邊 1200px、不放大」語意：給定的 width/height
+ * 是縮放框的上限，長寬比不變，只會縮小不會放大。
+ */
+async function reencodeToWebpViaImagesBinding(
+  buffer: Buffer,
+): Promise<{ buffer: Buffer; width: number; height: number }> {
+  const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+  const { env } = getCloudflareContext();
+  const images = env.IMAGES as unknown as ImagesBindingShape;
+
+  const detectedType = detectImageType(buffer);
+  const orientation = detectedType === "image/jpeg" ? readJpegExifOrientation(buffer) : 1;
+
+  let transformer = images.input(new Blob([new Uint8Array(buffer)]).stream());
+  transformer = applyExifOrientationTransform(transformer, orientation);
+  transformer = transformer.transform({ width: MAX_EDGE_PX, height: MAX_EDGE_PX, fit: "scale-down" });
+
+  const result = await transformer.output({ format: "image/webp" });
+  const webpBuffer = Buffer.from(await new Response(result.image()).arrayBuffer());
+
+  const info = await images.info(new Blob([new Uint8Array(webpBuffer)]).stream());
+  if (!("width" in info)) {
+    throw new Error("Cloudflare Images binding 未回傳轉檔後圖片的尺寸");
+  }
+
+  return { buffer: webpBuffer, width: info.width, height: info.height };
+}
+
+export async function reencodeToWebp(
+  buffer: Buffer,
+): Promise<{ buffer: Buffer; width: number; height: number }> {
+  return isCloudflareWorkersRuntime() ? reencodeToWebpViaImagesBinding(buffer) : reencodeToWebpViaPhoton(buffer);
 }

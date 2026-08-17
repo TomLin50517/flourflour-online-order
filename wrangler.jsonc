@@ -22,5 +22,12 @@
       "id": "c3e4cf1358434f15a3a425b85826c342",
       "localConnectionString": "postgresql://flourflour:flourflour@localhost:5432/flourflour"
     }
-  ]
+  ],
+  // 見 docs/OPEN-QUESTIONS.md：@cf-wasm/photon 的 workerd 進入點在 Next.js
+  // 的 bundler（Turbopack／webpack）下建置期就會失敗，改用 Cloudflare 原生
+  // 的 Images binding 取代——不需要任何 npm wasm 套件，執行期直接呼叫這個
+  // binding 做 resize／旋轉／webp 轉檔，完全繞開整個 wasm 打包相容性問題。
+  "images": {
+    "binding": "IMAGES"
+  }
 }
