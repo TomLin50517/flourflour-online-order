@@ -14,6 +14,11 @@ import { checkRateLimit } from "@/lib/rate-limit";
 // 移除 proxy.ts、把登入檢查搬到 app/admin/(dashboard)/layout.tsx，這個檔案不再
 // 需要給 middleware 用的輕量版本，合併回單一檔案。
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  // Cloudflare Workers（跟其他 serverless/edge 平台一樣）需要明確信任 Request 的
+  // Host header，否則 Auth.js 會拋 UntrustedHost 錯誤（見
+  // https://errors.authjs.dev#untrustedhost）。NEXTAUTH_URL 已固定指向正式網域，
+  // 故信任 Host header 不會被用來偽造跳轉目標。
+  trustHost: true,
   session: { strategy: "jwt" },
   pages: { signIn: "/admin/login" },
   callbacks: {
