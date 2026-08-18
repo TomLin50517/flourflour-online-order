@@ -29,7 +29,10 @@ export class NoSuccessfulPaymentError extends AppError {
  */
 export async function refundOrder(input: {
   orderId: string;
-  expectedVersion: number;
+  /** 見 SPEC.md §8.3：POST /admin/orders/{id}/refund 端點不接收 expectedVersion，
+   * 省略時直接採用本函式讀到的最新版本；`updateOrderStatusAdmin()` 會傳入真正的
+   * client 端已知版本，維持該路徑原本的樂觀鎖語意。 */
+  expectedVersion?: number;
   reason: string;
   actorId: string;
 }) {
@@ -71,7 +74,7 @@ export async function refundOrder(input: {
     const result = await transition({
       tx,
       orderId: order.id,
-      expectedVersion: input.expectedVersion,
+      expectedVersion: input.expectedVersion ?? order.version,
       toStatus: "REFUNDED",
       actorType: "ADMIN",
       actorId: input.actorId,

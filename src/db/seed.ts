@@ -323,7 +323,8 @@ async function main() {
       product.optionGroups.map((code, groupSortOrder) => {
         const groupId = optionGroupIdByCode.get(code);
         if (!groupId) throw new Error(`Unknown option group: ${code}`);
-        const group = optionGroups.find((g) => g.code === code)!;
+        const group = optionGroups.find((g) => g.code === code);
+        if (!group) throw new Error(`Unknown option group: ${code}`);
         return {
           productId: createdProduct.id,
           groupId,

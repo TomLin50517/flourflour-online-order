@@ -69,10 +69,9 @@ export default function AdminOrdersPage() {
     {
       refreshInterval: 10_000,
       onSuccess: (data) => {
-        if (knownIds.current) {
-          const newlyPaid = data.filter(
-            (o) => o.status === "PAID" && !knownIds.current!.has(o.id),
-          );
+        const known = knownIds.current;
+        if (known) {
+          const newlyPaid = data.filter((o) => o.status === "PAID" && !known.has(o.id));
           if (newlyPaid.length > 0 && soundEnabled) playBeep();
         }
         knownIds.current = new Set(data.map((o) => o.id));
@@ -101,7 +100,16 @@ export default function AdminOrdersPage() {
       setError("操作失敗，請稍後再試");
       return;
     }
-    await mutate();
+    // 見 docs/OPEN-QUESTIONS.md：Hyperdrive 的 query cache 會讓緊接在寫入後的
+    // GET 短暫讀到寫入前的舊資料。PATCH 回應本身就是資料庫剛寫入的最新值，
+    // 直接拿它更新本地快取，不要靠緊接著的 mutate() 重新 GET，避免畫面把
+    // 剛完成的操作「蓋回」舊狀態，讓工作人員誤以為按鈕沒有生效。
+    const updated: { status: AdminOrder["status"]; version: number } = await res.json();
+    await mutate(
+      (current) =>
+        current?.map((o) => (o.id === order.id ? { ...o, status: updated.status, version: updated.version } : o)),
+      { revalidate: false },
+    );
   }
 
   const filtered = pickupFilter

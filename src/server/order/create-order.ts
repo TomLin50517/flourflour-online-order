@@ -122,7 +122,14 @@ function prepareItem(
   }
 
   const options: PreparedOption[] = optionItemIds.map((optionItemId) => {
-    const resolved = optionIndex.get(optionItemId)!;
+    const resolved = optionIndex.get(optionItemId);
+    if (!resolved) {
+      // 理論上不會發生：optionItemId 已在上面的迴圈驗證過存在於 optionIndex。
+      throw new InvalidOptionSelectionError(`規格選項不屬於此商品：${optionItemId}`, {
+        productId: product.id,
+        optionItemId,
+      });
+    }
     return {
       optionItemId,
       groupNameSnapshot: resolved.groupTranslations,
