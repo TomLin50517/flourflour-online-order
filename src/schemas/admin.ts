@@ -89,7 +89,10 @@ export const updateOptionGroupSchema = z.object({
   maxSelect: z.number().int().min(1).optional(),
   isActive: z.boolean().optional(),
   translations: z.array(categoryTranslationSchema).length(4).optional(),
-  items: z.array(optionItemInputSchema).optional(),
+  // 見 createOptionGroupSchema：items 若有帶就跟建立時一樣至少要 1 筆，避免把既有
+  // 規格群組的選項全部清空（目前後台 UI 沒有「刪除單一選項」的按鈕，故非 UI 可觸發，
+  // 但 API 本身仍應保持跟建立時一致的最小需求，不依賴前端不提供這個操作來保護）。
+  items: z.array(optionItemInputSchema).min(1).optional(),
 });
 
 export const adminOrdersQuerySchema = z.object({
