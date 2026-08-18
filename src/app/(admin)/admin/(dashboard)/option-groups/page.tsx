@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { fetcher } from "@/lib/fetcher";
+import { fetcher, formatApiErrorMessage } from "@/lib/fetcher";
 import { LOCALES, type Locale } from "@/lib/i18n/locale-map";
 
 type Item = {
@@ -123,7 +123,7 @@ export default function OptionGroupsPage() {
 
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      setError(body?.error?.message ?? "儲存失敗");
+      setError(formatApiErrorMessage(body, "儲存失敗"));
       return;
     }
 

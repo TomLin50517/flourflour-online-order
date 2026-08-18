@@ -27,7 +27,7 @@ export const createProductSchema = z.object({
 });
 
 export const updateProductSchema = z.object({
-  slug: z.string().regex(/^[a-z0-9-]+$/).optional(),
+  slug: z.string().regex(/^[a-z0-9-]+$/, "slug 只能是小寫英數字與連字號").optional(),
   sku: z.string().max(50).nullable().optional(),
   categoryId: z.string().min(1).nullable().optional(),
   basePrice: z.number().int().min(0).optional(),
@@ -51,13 +51,13 @@ const categoryTranslationSchema = z.object({
 });
 
 export const createCategorySchema = z.object({
-  slug: z.string().min(1).regex(/^[a-z0-9-]+$/),
+  slug: z.string().min(1).regex(/^[a-z0-9-]+$/, "slug 只能是小寫英數字與連字號"),
   sortOrder: z.number().int().optional(),
   translations: z.array(categoryTranslationSchema).length(4),
 });
 
 export const updateCategorySchema = z.object({
-  slug: z.string().regex(/^[a-z0-9-]+$/).optional(),
+  slug: z.string().regex(/^[a-z0-9-]+$/, "slug 只能是小寫英數字與連字號").optional(),
   sortOrder: z.number().int().optional(),
   isActive: z.boolean().optional(),
   translations: z.array(categoryTranslationSchema).length(4).optional(),

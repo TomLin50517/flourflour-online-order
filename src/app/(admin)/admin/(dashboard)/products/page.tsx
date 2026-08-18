@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import useSWR from "swr";
-import { fetcher } from "@/lib/fetcher";
+import { fetcher, formatApiErrorMessage } from "@/lib/fetcher";
 
 type ProductRow = {
   id: string;
@@ -30,7 +30,7 @@ export default function ProductsListPage() {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      alert(body?.error?.message ?? "操作失敗");
+      alert(formatApiErrorMessage(body, "操作失敗"));
     }
     await mutate();
   }

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { formatApiErrorMessage } from "@/lib/fetcher";
 import { LOCALES, type Locale } from "@/lib/i18n/locale-map";
 
 type Translation = { locale: Locale; name: string; description: string };
@@ -78,7 +79,7 @@ export function ProductForm({
       const res = await fetch("/api/v1/admin/uploads", { method: "POST", body });
       if (!res.ok) {
         const errorBody = await res.json().catch(() => null);
-        throw new Error(errorBody?.error?.message ?? "上傳失敗");
+        throw new Error(formatApiErrorMessage(errorBody, "上傳失敗"));
       }
       const { url, width, height } = await res.json();
 
@@ -139,7 +140,7 @@ export function ProductForm({
 
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      setError(body?.error?.message ?? "儲存失敗");
+      setError(formatApiErrorMessage(body, "儲存失敗"));
       return;
     }
 
