@@ -176,7 +176,10 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
         </div>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-10 flex items-center justify-between border-t bg-background px-4 py-3">
+      {/* 見 (storefront)/[locale]/layout.tsx：body 有 max-w-md mx-auto 限制寬度，
+          但 fixed 定位是相對整個視窗、不受父層寬度限制，這裡比照加上同樣的
+          寬度與置中，才能跟上方內容欄對齊，不會桌面版時比內容還寬。 */}
+      <div className="fixed inset-x-0 bottom-0 z-10 mx-auto flex max-w-md items-center justify-between border-t bg-background px-4 py-3">
         <span className="text-lg font-semibold">NT${total}</span>
         <button
           type="button"

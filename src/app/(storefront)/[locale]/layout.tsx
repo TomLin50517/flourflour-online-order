@@ -36,7 +36,11 @@ export default async function LocaleLayout(props: LayoutProps<"/[locale]">) {
 
   return (
     <html lang={locale}>
-      <body>
+      {/* 見 docs/OPEN-QUESTIONS.md：前台版型是手機優先設計（單欄、滿版元件），
+          原本沒有針對桌面設定寬度上限，導致在寬螢幕上（尤其是商品頁的
+          aspect-square 主圖）整個版面被拉伸到誇張的滿版尺寸。限制在手機／
+          小平板寬度並置中，桌面瀏覽時維持原本設計的比例與觀感。 */}
+      <body className="mx-auto max-w-md">
         {/* 見 docs/OPEN-QUESTIONS.md：移除 middleware 後，next-intl 自動偵測目前
             locale 的機制（原本部分依賴 middleware 設定的線索）不可靠，client
             端的 useRouter()/Link 等 navigation helper 會退回 defaultLocale，
