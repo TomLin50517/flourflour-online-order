@@ -15,7 +15,9 @@
     "orderCreated": "訂單已建立",
     "redirectingToPayment": "正在導向付款頁…",
     "paymentFailed": "建立付款失敗，請重試",
-    "backToMenu": "返回菜單"
+    "backToMenu": "返回菜單",
+    "testPauseMessage": "感謝您協助測試！金流廠商串接完成後，付款成功會在此產生取貨號碼。",
+    "testPauseConfirm": "確定"
   },
   "order": {
     "title": "訂單狀態",

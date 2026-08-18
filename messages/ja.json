@@ -15,7 +15,9 @@
     "orderCreated": "注文が作成されました",
     "redirectingToPayment": "決済ページに移動しています…",
     "paymentFailed": "決済の開始に失敗しました。もう一度お試しください",
-    "backToMenu": "メニューに戻る"
+    "backToMenu": "メニューに戻る",
+    "testPauseMessage": "テストにご協力いただきありがとうございます！決済連携が完了すると、支払い成功時にここで受け取り番号が発行されます。",
+    "testPauseConfirm": "OK"
   },
   "order": {
     "title": "注文状況",

@@ -24,6 +24,13 @@ type CreateChargeResult =
       sdkParams: Record<string, unknown>;
     };
 
+// TEMP(pre-launch testing)：金流廠商尚未串接（見 docs/OPEN-QUESTIONS.md「正式站
+// PAYMENT_PROVIDER=mock」條目），正式站上導向付款頁一律 404。在真正的廠商串接
+// 完成前，先讓使用者測試「瀏覽 → 加入購物車 → 結帳 → 送出訂單」這段流程，建單
+// 成功後改顯示提示對話框、不呼叫 startPayment()。廠商串接完成後應移除這個開關，
+// 讓流程直接呼叫 startPayment()。
+const PAUSE_BEFORE_PAYMENT_FOR_TESTING = true;
+
 function submitFormPost(action: string, fields: Record<string, string>) {
   const form = document.createElement("form");
   form.method = "POST";
@@ -53,6 +60,7 @@ export default function CheckoutPage() {
   const [payingState, setPayingState] = useState<"idle" | "paying" | "failed">("idle");
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderResult | null>(null);
+  const [showTestPauseDialog, setShowTestPauseDialog] = useState(false);
 
   const startPayment = useCallback(
     async (orderNo: string, accessToken: string) => {
@@ -128,6 +136,10 @@ export default function CheckoutPage() {
     setOrder(created);
     clear();
     setSubmitting(false);
+    if (PAUSE_BEFORE_PAYMENT_FOR_TESTING) {
+      setShowTestPauseDialog(true);
+      return;
+    }
     await startPayment(created.orderNo, created.accessToken);
   }
 
@@ -154,6 +166,25 @@ export default function CheckoutPage() {
         <a href={`/${locale}`} className="mt-6 inline-block underline">
           {t("backToMenu")}
         </a>
+
+        {showTestPauseDialog && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+          >
+            <div className="w-full max-w-sm rounded-lg bg-background p-6 text-center shadow-lg">
+              <p className="text-sm text-foreground">{t("testPauseMessage")}</p>
+              <button
+                type="button"
+                onClick={() => router.push(`/${locale}`)}
+                className="mt-4 w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground"
+              >
+                {t("testPauseConfirm")}
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     );
   }

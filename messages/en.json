@@ -15,7 +15,9 @@
     "orderCreated": "Order created",
     "redirectingToPayment": "Redirecting to payment…",
     "paymentFailed": "Failed to start payment, please try again",
-    "backToMenu": "Back to menu"
+    "backToMenu": "Back to menu",
+    "testPauseMessage": "Thanks for testing! Once payment integration is complete, a successful payment will generate a pickup number here.",
+    "testPauseConfirm": "OK"
   },
   "order": {
     "title": "Order Status",

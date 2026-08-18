@@ -15,7 +15,9 @@
     "orderCreated": "주문이 생성되었습니다",
     "redirectingToPayment": "결제 페이지로 이동 중…",
     "paymentFailed": "결제 시작에 실패했습니다. 다시 시도해 주세요",
-    "backToMenu": "메뉴로 돌아가기"
+    "backToMenu": "메뉴로 돌아가기",
+    "testPauseMessage": "테스트에 참여해 주셔서 감사합니다! 결제 연동이 완료되면 결제 성공 시 이곳에서 픽업 번호가 발급됩니다.",
+    "testPauseConfirm": "확인"
   },
   "order": {
     "title": "주문 상태",
