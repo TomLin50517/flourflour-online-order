@@ -1,7 +1,7 @@
 {
   "common": { "add": "加入", "cancel": "取消", "loading": "載入中…" },
   "menu": { "title": "菜單", "soldOut": "已售完", "empty": "目前尚無商品" },
-  "product": { "quantity": "數量", "addToCart": "加入購物車", "required": "必選" },
+  "product": { "quantity": "數量", "addToCart": "加入購物車", "required": "必選", "containsAlcohol": "含酒精" },
   "cart": { "title": "購物車", "empty": "購物車是空的", "subtotal": "小計" },
   "checkout": {
     "title": "結帳",

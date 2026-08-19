@@ -45,6 +45,7 @@ export async function getProduct(
     description: translation?.description ?? null,
     basePrice: product.basePrice,
     isSoldOut: product.isSoldOut,
+    containsAlcohol: product.containsAlcohol,
     images: product.images.map((image) => ({
       url: image.url,
       width: image.width,

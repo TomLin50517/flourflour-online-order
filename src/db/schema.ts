@@ -156,6 +156,7 @@ export const product = pgTable(
     sortOrder: integer("sortOrder").notNull().default(0),
     isActive: boolean("isActive").notNull().default(true), // 上架/下架
     isSoldOut: boolean("isSoldOut").notNull().default(false), // 今日售完（每日 cutoff 自動歸 false）
+    containsAlcohol: boolean("containsAlcohol").notNull().default(false), // 含酒精，需於選單／商品頁明確標示
     createdAt: ts("createdAt").notNull().defaultNow(),
     updatedAt: ts("updatedAt")
       .notNull()

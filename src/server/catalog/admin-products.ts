@@ -140,6 +140,7 @@ export async function createProduct(
     categoryId?: string;
     basePrice: number;
     sortOrder?: number;
+    containsAlcohol?: boolean;
     translations: TranslationInput[];
     optionGroupIds: string[];
   },
@@ -160,6 +161,7 @@ export async function createProduct(
         categoryId: input.categoryId,
         basePrice: input.basePrice,
         sortOrder: input.sortOrder ?? 0,
+        containsAlcohol: input.containsAlcohol ?? false,
         isActive: false, // 見 INV-1/INV-2：建立當下沒有圖片，不能上架
       })
       .returning();
@@ -213,6 +215,7 @@ export async function updateProduct(
     basePrice?: number;
     sortOrder?: number;
     isActive?: boolean;
+    containsAlcohol?: boolean;
     translations?: TranslationInput[];
     optionGroupIds?: string[];
     images?: ImageInput[];
@@ -260,6 +263,7 @@ export async function updateProduct(
     if (input.basePrice !== undefined) patch.basePrice = input.basePrice;
     if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder;
     if (input.isActive !== undefined) patch.isActive = input.isActive;
+    if (input.containsAlcohol !== undefined) patch.containsAlcohol = input.containsAlcohol;
 
     const [productRow] =
       Object.keys(patch).length > 0

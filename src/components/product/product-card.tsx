@@ -37,6 +37,11 @@ export function ProductCard({ product }: { product: MenuProduct }) {
             </span>
           </div>
         )}
+        {product.containsAlcohol && (
+          <span className="absolute left-1.5 top-1.5 rounded bg-amber-600 px-1.5 py-0.5 text-[10px] font-medium text-white">
+            {tProduct("containsAlcohol")}
+          </span>
+        )}
       </div>
       <div className="flex flex-1 flex-col gap-1 p-3">
         <h3 className="text-sm font-medium">{product.name}</h3>

@@ -55,6 +55,7 @@ export async function getMenu(locale: Locale): Promise<Menu> {
               : null,
             isSoldOut: product.isSoldOut,
             hasOptions: product.optionGroups.length > 0,
+            containsAlcohol: product.containsAlcohol,
           };
         }),
       };

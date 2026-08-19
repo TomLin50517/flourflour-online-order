@@ -14,6 +14,7 @@ export type MenuProduct = {
   primaryImage: MenuImage | null;
   isSoldOut: boolean;
   hasOptions: boolean;
+  containsAlcohol: boolean;
 };
 
 export type MenuCategory = {
@@ -53,6 +54,7 @@ export type ProductDetail = {
   description: string | null;
   basePrice: number;
   isSoldOut: boolean;
+  containsAlcohol: boolean;
   images: MenuImage[];
   optionGroups: ProductOptionGroup[];
 };

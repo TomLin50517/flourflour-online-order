@@ -22,6 +22,7 @@ export const createProductSchema = z.object({
   categoryId: z.string().min(1).optional(),
   basePrice: z.number().int().min(0),
   sortOrder: z.number().int().optional(),
+  containsAlcohol: z.boolean().optional(),
   translations: z.array(translationInputSchema).length(4),
   optionGroupIds: z.array(z.string().min(1)).optional().default([]),
 });
@@ -33,6 +34,7 @@ export const updateProductSchema = z.object({
   basePrice: z.number().int().min(0).optional(),
   sortOrder: z.number().int().optional(),
   isActive: z.boolean().optional(),
+  containsAlcohol: z.boolean().optional(),
   translations: z.array(translationInputSchema).length(4).optional(),
   optionGroupIds: z.array(z.string().min(1)).optional(),
   images: z.array(productImageInputSchema).optional(),

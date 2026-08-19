@@ -322,6 +322,7 @@ model Product {
   sortOrder   Int      @default(0)
   isActive    Boolean  @default(true)      // 上架/下架
   isSoldOut   Boolean  @default(false)     // 今日售完（每日 cutoff 自動歸 false）
+  containsAlcohol Boolean @default(false)  // 含酒精，需於選單／商品頁明確標示（2026-08-19 新增）
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   deletedAt   DateTime?                    // 軟刪除；有訂單引用的商品不得硬刪
@@ -1065,6 +1066,7 @@ Header：`X-Order-Token: <accessToken>`
 - 商品卡片：主圖（1:1，`next/image`，lazy）、名稱、簡介（2 行截斷）、價格、快速加入按鈕
 - 無規格商品 → 卡片上直接「＋」加入；有規格商品 → 導向詳情頁
 - `isSoldOut = true` → 卡片灰階 + 「已售完」遮罩，不可點擊
+- `containsAlcohol = true` → 卡片上明顯標示含酒精徽章（2026-08-19 新增，見 §5.1 Product model）
 - 空狀態、載入骨架屏皆須實作
 
 ### 9.3 商品詳情頁 `/{locale}/product/{slug}`
@@ -1074,6 +1076,7 @@ Header：`X-Order-Token: <accessToken>`
 - 必填群組未選 → 「加入購物車」按鈕 disabled 並顯示提示
 - 數量 stepper（1–99）
 - 底部 sticky bar：即時試算金額 = `(basePrice + Σ選項) × 數量`
+- `containsAlcohol = true` → 標題下方顯示明顯的含酒精警示徽章（2026-08-19 新增）
 
 ### 9.4 購物車 `/{locale}/cart`
 

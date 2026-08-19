@@ -1,7 +1,7 @@
 {
   "common": { "add": "담기", "cancel": "취소", "loading": "불러오는 중…" },
   "menu": { "title": "메뉴", "soldOut": "품절", "empty": "현재 이용 가능한 상품이 없습니다" },
-  "product": { "quantity": "수량", "addToCart": "장바구니에 담기", "required": "필수" },
+  "product": { "quantity": "수량", "addToCart": "장바구니에 담기", "required": "필수", "containsAlcohol": "알코올 함유" },
   "cart": { "title": "장바구니", "empty": "장바구니가 비어 있습니다", "subtotal": "소계" },
   "checkout": {
     "title": "결제",

@@ -97,6 +97,11 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
       <div className="space-y-6 px-4 py-4">
         <div>
           <h1 className="text-xl font-semibold">{product.name}</h1>
+          {product.containsAlcohol && (
+            <span className="mt-1 inline-block rounded bg-amber-600 px-2 py-0.5 text-xs font-medium text-white">
+              {t("containsAlcohol")}
+            </span>
+          )}
           {product.description && (
             <p className="mt-1 text-sm text-muted-foreground">{product.description}</p>
           )}

@@ -33,6 +33,7 @@ export function ProductForm({
     sku: string;
     categoryId: string;
     basePrice: number;
+    containsAlcohol: boolean;
     translations: { locale: string; name: string; description: string | null }[];
     images: ImageRow[];
     optionGroupIds: string[];
@@ -43,6 +44,7 @@ export function ProductForm({
   const [sku, setSku] = useState(initial?.sku ?? "");
   const [categoryId, setCategoryId] = useState(initial?.categoryId ?? "");
   const [basePrice, setBasePrice] = useState(initial?.basePrice ?? 0);
+  const [containsAlcohol, setContainsAlcohol] = useState(initial?.containsAlcohol ?? false);
   const [translations, setTranslations] = useState<Translation[]>(
     initial
       ? LOCALES.map((locale) => {
@@ -116,6 +118,7 @@ export function ProductForm({
       sku: sku || undefined,
       categoryId: categoryId || undefined,
       basePrice,
+      containsAlcohol,
       translations: translations.map((t) => ({
         locale: t.locale,
         name: t.name,
@@ -194,6 +197,14 @@ export function ProductForm({
               onChange={(e) => setBasePrice(Number(e.target.value))}
               className="mt-1 w-full rounded-md border px-2 py-1"
             />
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={containsAlcohol}
+              onChange={(e) => setContainsAlcohol(e.target.checked)}
+            />
+            含酒精（會在選單／商品頁顯示警示徽章）
           </label>
         </div>
       </section>

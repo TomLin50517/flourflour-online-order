@@ -29,6 +29,7 @@ export default async function EditProductPage(
           sku: product.sku ?? "",
           categoryId: product.categoryId ?? "",
           basePrice: product.basePrice,
+          containsAlcohol: product.containsAlcohol,
           translations: product.translations,
           images: product.images.map((img) => ({
             url: img.url,
