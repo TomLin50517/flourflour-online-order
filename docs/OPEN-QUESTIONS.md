@@ -283,10 +283,13 @@
 - 暫定假設：**不擅自變更**——是否要為了短期可用而破例讓 mock provider 在正式站也能被觸發（例如另外做一個需要管理者權限才能觸發的「模擬付款」後台功能，取代目前顧客導向的 `/dev/mock-pay` 頁面），還是就維持現狀、等待真實金流廠商串接完成才算真正可上線，是產品層級的決定，應由使用者選擇，不是程式碼正確性問題。
 - 影響範圍：`src/lib/payment/registry.ts`、`src/lib/payment/providers/mock.ts`、`src/app/(dev)/dev/mock-pay/`（現況皆未變更）；`docs/VENDOR-API-CHECKLIST.md` 待廠商文件到位後的串接仍是解除此限制的正途。
 
-### 正式站圖片間歇性被 CSP 擋掉，一開始誤判為建置快取問題，後來證據指向部署後的全球傳播延遲
-- 里程碑：M6 之後（2026-08-16～19 之間反覆發生三次：R2 剛接上時、checkout 暫停測試那次、以及這次使用者回報「上傳圖片又壞了」）
+### 正式站圖片間歇性被 CSP 擋掉——真正根因：Cloudflare Git 自動部署跟本機手動部署互相覆蓋（已解決：關閉自動部署）
+- 里程碑：M6 之後（2026-08-16～19 之間反覆發生，前後有三種不同的錯誤診斷，最後才找到真正根因）
 - 問題：症狀是後台／前台指向 R2 的圖片顯示不出來（`<img>` 的 `naturalWidth/naturalHeight` 是 0），查證是回應的 CSP `img-src` 缺了 R2 網域，導致瀏覽器擋圖——外觀很像「上傳失敗」，但上傳、資料庫寫入其實都是對的。
-- 前兩次的判斷（**部分推翻，見下）**：一開始認定是 `npm run cf:deploy` 沒清乾淨建置快取（Turbopack 持久化快取等），導致偶爾打包出舊版 CSP，並以「乾淨重建後一定正確」為證據。這次（第三次）重新驗證時發現關鍵反例：**同一次部署，用 curl 立刻分別打前台 `/zh-TW` 與後台 `/admin/products/...`，前台缺 R2、後台卻是對的**——這兩個路由共用同一份 `next.config.ts` 算出的同一個 CSP 字串（`headers()` 用 `source: "/:path*"` 全站套用同一份），若真是建置階段算錯，兩者不可能一個對一個錯。且兩者的 `Cache-Control` 都是 `private, no-cache, no-store, max-age=0, must-revalidate`，代表這幾個頁面本來就沒有被任何一層 HTTP 快取住。幾秒後重新檢查，兩個路由都變成正確。這個「同一份部署、不同網址暫時不一致、幾秒後自行收斂」的模式，比較符合 **Cloudflare Workers 部署後全球邊緣節點傳播需要時間**，不同節點在傳播完成前可能還在跑舊版本——而不是建置階段就把錯的東西打包出去。換句話說，先前兩次「清快取重建後就正常」的觀察，很可能是巧合：驗證的當下剛好已經過了傳播延遲的時間窗，不代表清快取本身是關鍵動作。
-- 暫定結論：**沒有百分之百排除建置快取確實也是變因之一的可能**（`clean:build` 仍保留，見下），但目前證據更支持「部署後太快驗證，撞到全球傳播延遲」是主因。之後遇到類似「剛部署完馬上測試發現不對」的情況，**先等 30 秒到 1 分鐘再重新檢查，不要立刻斷定是程式碼或建置流程的問題**。
-- 已做的防禦性處理（無論真正根因是哪個，都無害且合理）：把清快取步驟寫進 `package.json` 的部署指令本身，不再依賴「記得手動清」——新增 `clean:build` script（`node -e` 呼叫 `fs.rmSync` 砍掉 `.next`／`.open-next`／`.wrangler`／`node_modules/.cache`，跨平台），`cf:build`／`cf:preview`／`cf:deploy` 都先跑這個再建置。
-- 影響範圍：`package.json`（新增 `clean:build`，`cf:build`/`cf:preview`/`cf:deploy` 皆已串接）；`next.config.ts` 本身未變更。
+- **診斷過程（記錄下來避免下次又繞遠路）**：
+  1. 第一輪：以為是 `npm run cf:deploy` 沒清乾淨建置快取，「清乾淨重建後就正常」當作證據，但沒解釋透徹。
+  2. 第二輪：發現同一次部署裡前台／後台 CSP 不一致、幾秒後又自行收斂，改判斷是 Cloudflare 部署後全球邊緣節點傳播延遲，把「清快取」寫進 `package.json`（`clean:build`，串進 `cf:build`/`cf:preview`/`cf:deploy`）當作防禦性措施保留。
+  3. 第三輪（真正找到根因）：用 `npx wrangler deployments list` 比對時間戳，發現在我手動部署、`git push` 之後 **4 分鐘**，出現一筆我沒有主動觸發的新部署。到 Cloudflare Dashboard 該 Worker 的 Settings → Build 頁面確認：**這個 repo 本來就接了 Cloudflare 的 Git 自動部署**（`master` 分支 push 會觸發 `npx opennextjs-cloudflare build` + `npx wrangler deploy`）。這個自動建置環境跟本機不同、沒有 `.env.production`（刻意不進 git，只給本機部署用），所以每次自動部署都會產生缺少 R2 網域的錯誤 CSP，蓋掉我手動部署的正確版本——兩條部署路徑互相覆蓋，誰後跑誰贏，才是整個「時好時壞」的真正原因，前兩輪的診斷都只是摸到局部症狀。
+- 解法（治本）：使用者到 Cloudflare Dashboard 的 Build 設定頁面按「Disconnect」，關閉 Git 自動部署。之後只有 `npm run cf:deploy`（本機、有 `.env.production`）會真正部署到正式站，不會再有第二條路徑互相打架。關閉後用 `wrangler deployments list` 確認沒有再冒出非預期部署，並連續 5 次 curl 確認 CSP 穩定正確。
+- 若之後想改回「push 即部署」：需要在 Cloudflare 的 Build 設定裡另外找到 Environment Variables 區塊，把 `STORAGE_PUBLIC_BASE_URL` 設成跟 `.env.production` 一樣的 R2 公開網址，讓雲端建置環境跟本機一致；但這樣未來任何環境變數異動都要兩邊同步改，這次的教訓正是「忘了同步」才炸的，暫不建議走這條路。
+- 影響範圍：Cloudflare Dashboard（Worker `flourflour-online-order` 的 Git 整合已由使用者手動 disconnect，程式碼本身無需異動）；`package.json` 的 `clean:build` 予以保留（無害的建置衛生習慣，即使不是本次的根因）；`next.config.ts` 全程未變更，原始碼本來就是對的。
