@@ -42,7 +42,7 @@ export default async function MenuPage(props: PageProps<"/[locale]">) {
                 className="scroll-mt-28 px-4 pt-6"
               >
                 <h2 className="mb-3 text-lg font-semibold">{category.name}</h2>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   {category.products.map((product) => (
                     <ProductCard key={product.id} product={product} />
                   ))}
