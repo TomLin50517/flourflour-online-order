@@ -140,13 +140,19 @@ export async function createProduct(
     categoryId?: string;
     basePrice: number;
     sortOrder?: number;
+    isActive?: boolean;
     containsAlcohol?: boolean;
     translations: TranslationInput[];
     optionGroupIds: string[];
+    images?: ImageInput[];
   },
   actorId: string,
 ) {
   assertFourTranslations(input.translations);
+  // 見 SPEC.md §5.2 INV-1 / INV-2：可以直接建立時就上架，但一樣要滿足圖片與四語系翻譯的前提。
+  if (input.isActive) {
+    assertActivationInvariants(input.translations.length, input.images ?? []);
+  }
   const db = await getDb();
   const store = orThrow(await db.query.store.findFirst());
   const optionGroupBindings = await buildOptionGroupBindings(db, input.optionGroupIds);
@@ -162,7 +168,7 @@ export async function createProduct(
         basePrice: input.basePrice,
         sortOrder: input.sortOrder ?? 0,
         containsAlcohol: input.containsAlcohol ?? false,
-        isActive: false, // 見 INV-1/INV-2：建立當下沒有圖片，不能上架
+        isActive: input.isActive ?? false,
       })
       .returning();
 
@@ -173,6 +179,23 @@ export async function createProduct(
           .returning()
       : [];
 
+    const images = input.images?.length
+      ? await tx
+          .insert(productImageTable)
+          .values(
+            input.images.map((img, index) => ({
+              productId: productRow.id,
+              url: img.url,
+              width: img.width,
+              height: img.height,
+              altText: img.altText,
+              isPrimary: img.isPrimary ?? index === 0,
+              sortOrder: img.sortOrder ?? index,
+            })),
+          )
+          .returning()
+      : [];
+
     const optionGroups = optionGroupBindings.length
       ? await tx
           .insert(productOptionGroupTable)
@@ -180,8 +203,9 @@ export async function createProduct(
           .returning()
       : [];
 
-    return { ...productRow, translations, images: [], optionGroups };
+    return { ...productRow, translations, images, optionGroups };
   });
+  if (input.isActive) revalidateTag("menu", { expire: 0 });
   await writeAuditLog({ actorId, action: "product.create", targetType: "Product", targetId: product.id, diff: input });
   return product;
 }

@@ -8,6 +8,7 @@ type ProductRow = {
   id: string;
   slug: string;
   basePrice: number;
+  sortOrder: number;
   isActive: boolean;
   isSoldOut: boolean;
   translations: { locale: string }[];
@@ -27,6 +28,19 @@ export default function ProductsListPage() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: value }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      alert(formatApiErrorMessage(body, "操作失敗"));
+    }
+    await mutate();
+  }
+
+  async function updateSortOrder(id: string, sortOrder: number) {
+    const res = await fetch(`/api/v1/admin/products/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sortOrder }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
@@ -57,6 +71,7 @@ export default function ProductsListPage() {
               <th className="p-2">Slug</th>
               <th className="p-2">分類</th>
               <th className="p-2">價格</th>
+              <th className="p-2">排序</th>
               <th className="p-2">翻譯完整度</th>
               <th className="p-2">上架</th>
               <th className="p-2">售完</th>
@@ -79,6 +94,18 @@ export default function ProductsListPage() {
                   {p.category?.translations.find((t) => t.locale === "ZH_TW")?.name ?? "—"}
                 </td>
                 <td className="p-2">NT${p.basePrice}</td>
+                <td className="p-2">
+                  <input
+                    type="number"
+                    key={p.sortOrder}
+                    defaultValue={p.sortOrder}
+                    onBlur={(e) => {
+                      const value = Number(e.target.value);
+                      if (value !== p.sortOrder) updateSortOrder(p.id, value);
+                    }}
+                    className="w-16 rounded-md border px-2 py-1"
+                  />
+                </td>
                 <td className="p-2">
                   {p.translations.length === 4 ? (
                     "4/4"

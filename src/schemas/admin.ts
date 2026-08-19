@@ -22,9 +22,11 @@ export const createProductSchema = z.object({
   categoryId: z.string().min(1).optional(),
   basePrice: z.number().int().min(0),
   sortOrder: z.number().int().optional(),
+  isActive: z.boolean().optional(),
   containsAlcohol: z.boolean().optional(),
   translations: z.array(translationInputSchema).length(4),
   optionGroupIds: z.array(z.string().min(1)).optional().default([]),
+  images: z.array(productImageInputSchema).optional(),
 });
 
 export const updateProductSchema = z.object({

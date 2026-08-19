@@ -21,6 +21,7 @@ export default async function AdminDashboardLayout({
         <nav className="flex items-center gap-4 text-sm font-medium">
           <Link href="/admin/orders">訂單看板</Link>
           <Link href="/admin/products">商品管理</Link>
+          <Link href="/admin/categories">分類管理</Link>
           <Link href="/admin/option-groups">規格管理</Link>
           <Link href="/admin/stats">銷售統計</Link>
         </nav>

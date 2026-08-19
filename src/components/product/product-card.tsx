@@ -10,7 +10,11 @@ import type { MenuProduct } from "@/server/catalog/types";
 export function ProductCard({ product }: { product: MenuProduct }) {
   const t = useTranslations("menu");
   const tProduct = useTranslations("product");
-  const { addLine } = useCart();
+  const { lines, addLine } = useCart();
+
+  const cartQuantity = lines
+    .filter((line) => line.productId === product.id)
+    .reduce((sum, line) => sum + line.quantity, 0);
 
   function handleQuickAdd(event: React.MouseEvent) {
     event.preventDefault();
@@ -40,6 +44,11 @@ export function ProductCard({ product }: { product: MenuProduct }) {
         {product.containsAlcohol && (
           <span className="absolute left-1.5 top-1.5 rounded bg-amber-600 px-1.5 py-0.5 text-[10px] font-medium text-white">
             {tProduct("containsAlcohol")}
+          </span>
+        )}
+        {cartQuantity > 0 && (
+          <span className="absolute right-1.5 top-1.5 flex min-w-5 items-center justify-center rounded-full bg-primary px-1 py-0.5 text-[10px] font-medium text-primary-foreground">
+            x{cartQuantity}
           </span>
         )}
       </div>

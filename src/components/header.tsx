@@ -14,7 +14,7 @@ export function Header({ storeName }: { storeName: string }) {
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/95 px-4 py-3 backdrop-blur">
       <Link href="/" className="shrink-0">
-        <Image src="/images/logo.png" alt={storeName} width={480} height={128} priority className="h-8 w-auto" />
+        <Image src="/images/logo.png" alt={storeName} width={480} height={128} priority className="h-12 w-auto" />
       </Link>
       <div className="flex items-center gap-3">
         <LocaleSwitcher />

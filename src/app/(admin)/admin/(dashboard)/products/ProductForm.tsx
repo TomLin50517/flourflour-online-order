@@ -33,6 +33,7 @@ export function ProductForm({
     sku: string;
     categoryId: string;
     basePrice: number;
+    sortOrder: number;
     containsAlcohol: boolean;
     translations: { locale: string; name: string; description: string | null }[];
     images: ImageRow[];
@@ -44,6 +45,7 @@ export function ProductForm({
   const [sku, setSku] = useState(initial?.sku ?? "");
   const [categoryId, setCategoryId] = useState(initial?.categoryId ?? "");
   const [basePrice, setBasePrice] = useState(initial?.basePrice ?? 0);
+  const [sortOrder, setSortOrder] = useState(initial?.sortOrder ?? 0);
   const [containsAlcohol, setContainsAlcohol] = useState(initial?.containsAlcohol ?? false);
   const [translations, setTranslations] = useState<Translation[]>(
     initial
@@ -118,6 +120,7 @@ export function ProductForm({
       sku: sku || undefined,
       categoryId: categoryId || undefined,
       basePrice,
+      sortOrder,
       containsAlcohol,
       translations: translations.map((t) => ({
         locale: t.locale,
@@ -125,7 +128,8 @@ export function ProductForm({
         description: t.description || undefined,
       })),
       optionGroupIds: selectedGroupIds,
-      ...(mode === "edit" ? { images, isActive: activate } : {}),
+      images,
+      isActive: activate,
     };
 
     const res =
@@ -198,6 +202,15 @@ export function ProductForm({
               className="mt-1 w-full rounded-md border px-2 py-1"
             />
           </label>
+          <label>
+            排序（數字越小越前面，同分類內比較）
+            <input
+              type="number"
+              value={sortOrder}
+              onChange={(e) => setSortOrder(Number(e.target.value))}
+              className="mt-1 w-full rounded-md border px-2 py-1"
+            />
+          </label>
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -238,33 +251,31 @@ export function ProductForm({
         ))}
       </section>
 
-      {mode === "edit" && (
-        <section className="space-y-2 rounded-md border p-4">
-          <h2 className="font-medium">圖片</h2>
-          <div className="flex flex-wrap gap-2">
-            {images.map((img, i) => (
-              <div key={img.url} className="relative">
-                {/* eslint-disable-next-line @next/next/no-img-element -- admin 內部工具，上傳預覽不需要 next/image 最佳化 */}
-                <img
-                  src={img.url}
-                  alt=""
-                  className={`size-20 rounded object-cover ${img.isPrimary ? "ring-2 ring-primary" : ""}`}
-                />
-                <div className="mt-1 flex gap-1 text-[10px]">
-                  <button type="button" onClick={() => setPrimary(i)} className="underline">
-                    {img.isPrimary ? "主圖" : "設為主圖"}
-                  </button>
-                  <button type="button" onClick={() => removeImage(i)} className="text-destructive underline">
-                    刪除
-                  </button>
-                </div>
+      <section className="space-y-2 rounded-md border p-4">
+        <h2 className="font-medium">圖片</h2>
+        <div className="flex flex-wrap gap-2">
+          {images.map((img, i) => (
+            <div key={img.url} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element -- admin 內部工具，上傳預覽不需要 next/image 最佳化 */}
+              <img
+                src={img.url}
+                alt=""
+                className={`size-20 rounded object-cover ${img.isPrimary ? "ring-2 ring-primary" : ""}`}
+              />
+              <div className="mt-1 flex gap-1 text-[10px]">
+                <button type="button" onClick={() => setPrimary(i)} className="underline">
+                  {img.isPrimary ? "主圖" : "設為主圖"}
+                </button>
+                <button type="button" onClick={() => removeImage(i)} className="text-destructive underline">
+                  刪除
+                </button>
               </div>
-            ))}
-          </div>
-          <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} disabled={uploading} />
-          {uploading && <p className="text-xs text-muted-foreground">上傳中…</p>}
-        </section>
-      )}
+            </div>
+          ))}
+        </div>
+        <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} disabled={uploading} />
+        {uploading && <p className="text-xs text-muted-foreground">上傳中…</p>}
+      </section>
 
       <section className="space-y-2 rounded-md border p-4">
         <h2 className="font-medium">規格群組</h2>
@@ -288,15 +299,13 @@ export function ProductForm({
         >
           儲存草稿
         </button>
-        {mode === "edit" && (
-          <button
-            type="button"
-            onClick={() => handleSave(true)}
-            className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
-          >
-            儲存並上架
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => handleSave(true)}
+          className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
+        >
+          儲存並上架
+        </button>
       </div>
     </div>
   );
